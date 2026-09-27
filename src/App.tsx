@@ -117,7 +117,6 @@ export function getExtractedFieldValue(fieldVal: ExtractedFieldValue | undefined
 function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [databaseReady, setDatabaseReady] = useState(false)
-  const [databaseStatus, setDatabaseStatus] = useState('Connecting to SQLite…')
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [activeListId, setActiveListId] = useState<string | null>(null)
@@ -187,13 +186,11 @@ function App() {
         }
         if (!cancelled) {
           setProjects(savedProjects)
-          setDatabaseStatus('SQLite database')
           setDatabaseReady(true)
         }
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'The library database could not be loaded.')
-          setDatabaseStatus('Database unavailable')
         }
       }
     }
@@ -212,9 +209,7 @@ function App() {
           body: snapshot,
         })
         if (!response.ok) throw new Error('Changes could not be saved to the database.')
-        setDatabaseStatus('SQLite database')
       }).catch((saveError: unknown) => {
-        setDatabaseStatus('Save failed')
         setError(saveError instanceof Error ? saveError.message : 'Changes could not be saved.')
       })
     }, 180)
@@ -965,7 +960,7 @@ function App() {
     </aside>
 
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb"><span>Workspace</span><ArrowRight size={13} /><strong>{activeProject?.name ?? 'All libraries'}</strong></div><div className="topbar-right"><span className="local-indicator"><span /> {databaseStatus}</span><button className="icon-button help-button" title="About SyntheSys"><CircleHelp size={17} /></button></div></header>
+      <header className="topbar"><div className="breadcrumb"><span>Workspace</span><ArrowRight size={13} /><strong>{activeProject?.name ?? 'All libraries'}</strong></div><div className="topbar-right"><button className="icon-button help-button" title="About SyntheSys"><CircleHelp size={17} /></button></div></header>
 
       {!activeProject ? <section className="projects-page page-enter">
         <div className="page-eyebrow"><span className="eyebrow-line" /> EVIDENCE REVIEW WORKSPACE</div>
