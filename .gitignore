@@ -1,0 +1,73 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+env/
+ENV/
+
+# Production builds
+dist/
+dist-ssr/
+build/
+
+# Local Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# Runtime & Local Database Storage
+data/
+Demo Data/
+"Demo Data/"
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.log
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# macOS system files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor & IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary / Chat export dumps
+copilotchat.json
