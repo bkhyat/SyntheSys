@@ -927,15 +927,31 @@ function App() {
           rows.push(row)
         }
 
-        const blob = (await writeXlsxFile(rows as any)) as unknown as Blob
-        const url = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.setAttribute('download', `${fileName}.xlsx`)
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
+        const columns = [
+          { width: 40 }, // Title
+          { width: 25 }, // Authors
+          { width: 10 }, // Year
+          { width: 25 }, // Journal
+          { width: 20 }, // DOI
+          { width: 25 }, // URL
+          { width: 50 }, // Abstract
+        ]
+
+        if (hasScore) {
+          columns.push({ width: 16 }, { width: 40 })
+        }
+
+        for (let i = 0; i < extractionCols.length; i++) {
+          columns.push({ width: 30 })
+        }
+
+        columns.push({ width: 18 }, { width: 24 })
+
+        await writeXlsxFile(rows as any, {
+          columns,
+          stickyRowsCount: 1,
+        }).toFile(`${fileName}.xlsx`)
+
         setToast(`Exported ${visiblePapers.length} papers from ${activeList.name} as Excel workbook (.xlsx)`)
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Could not generate Excel export.')
