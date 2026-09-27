@@ -71,3 +71,4 @@ htmlcov/
 
 # Temporary / Chat export dumps
 copilotchat.json
+*.mp4

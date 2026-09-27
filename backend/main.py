@@ -118,6 +118,12 @@ async def save_projects(projects: list[ProjectInput]) -> list[dict[str, Any]]:
     return await run_in_threadpool(database.get_projects)
 
 
+@app.delete("/api/projects/{project_id}")
+async def delete_project(project_id: str) -> dict[str, str]:
+    await run_in_threadpool(database.delete_project, project_id)
+    return {"status": "deleted", "id": project_id}
+
+
 def _manuscript_directory(paper_id: str) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", paper_id):
         raise HTTPException(status_code=422, detail="Invalid paper ID.")

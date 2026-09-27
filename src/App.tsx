@@ -154,6 +154,7 @@ function App() {
   const [stageDraftMinScore, setStageDraftMinScore] = useState(9)
 
   const [creatingProject, setCreatingProject] = useState(false)
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const [projectName, setProjectName] = useState('')
   const [toast, setToast] = useState('')
   const [error, setError] = useState('')
@@ -378,6 +379,24 @@ function App() {
     setProjects((current) => [...current, project])
     setActiveProjectId(project.id); setActiveListId(project.lists[0].id)
     setProjectName(''); setCreatingProject(false)
+  }
+
+  async function confirmDeleteProject() {
+    if (!projectToDelete) return
+    const targetId = projectToDelete.id
+    const targetName = projectToDelete.name
+    setProjects((current) => current.filter((project) => project.id !== targetId))
+    if (activeProjectId === targetId) {
+      setActiveProjectId(null)
+      setActiveListId(null)
+    }
+    setProjectToDelete(null)
+    try {
+      await fetch(`/api/projects/${encodeURIComponent(targetId)}`, { method: 'DELETE' })
+    } catch {
+      // Auto-persisted by projects effect
+    }
+    setToast(`Deleted library "${targetName}"`)
   }
 
   // Open Create Stage Modal
@@ -970,7 +989,31 @@ function App() {
       <div className="side-label">WORKSPACE</div>
       <button className={`nav-link ${!activeProject ? 'active' : ''}`} onClick={() => { setActiveProjectId(null); setActiveListId(null) }}><BookOpen size={16} /><span>All libraries</span><span className="nav-count">{projects.length}</span></button>
       <div className="side-label project-label">YOUR LIBRARIES</div>
-      <div className="project-nav">{projects.map((project) => <button key={project.id} className={`nav-link project-nav-link ${project.id === activeProjectId ? 'active' : ''}`} onClick={() => { setActiveProjectId(project.id); setActiveListId(project.lists[0]?.id ?? null) }}><span className="project-dot" /><span className="project-nav-name">{project.name}</span><span className="nav-count">{paperCount(project)}</span></button>)}</div>
+      <div className="project-nav">
+        {projects.map((project) => (
+          <div key={project.id} className={`project-nav-item ${project.id === activeProjectId ? 'active' : ''}`}>
+            <button
+              className={`nav-link project-nav-link ${project.id === activeProjectId ? 'active' : ''}`}
+              onClick={() => { setActiveProjectId(project.id); setActiveListId(project.lists[0]?.id ?? null) }}
+            >
+              <span className="project-dot" />
+              <span className="project-nav-name">{project.name}</span>
+              <span className="nav-count">{paperCount(project)}</span>
+            </button>
+            <button
+              type="button"
+              className="sidebar-delete-btn"
+              title={`Delete ${project.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                setProjectToDelete(project)
+              }}
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
       <button className="new-project-link" onClick={() => setCreatingProject(true)}><Plus size={15} /> New library</button>
       <div className="sidebar-bottom"><div className="sidebar-note"><span className="note-symbol"><img src="/SyntheSys.ico" alt="SyntheSys icon" className="sidebar-note-ico" /></span><span>Evidence, synthesized.</span></div><div className="sidebar-version">SYNTHESYS <span>v0.1</span></div></div>
     </aside>
@@ -980,9 +1023,65 @@ function App() {
 
       {!activeProject ? <section className="projects-page page-enter">
         <div className="page-eyebrow"><span className="eyebrow-line" /> EVIDENCE REVIEW WORKSPACE</div>
-        <div className="page-heading-row"><div><h1>Your research,<br /><em>in clear stages.</em></h1><p className="page-intro">Build a transparent path from search results to a focused evidence set.</p></div><button className="button button-primary" onClick={() => setCreatingProject(true)}><Plus size={16} /> New library</button></div>
+        <div className="page-heading-row"><div><h1>Research Synthesis,<br /><em>in clear stages.</em></h1><p className="page-intro">Build a transparent path from search results to a focused evidence set.</p></div><button className="button button-primary" onClick={() => setCreatingProject(true)}><Plus size={16} /> New library</button></div>
         <div className="section-heading"><div><span className="section-kicker">COLLECTION</span><h2>Libraries <span className="heading-count">{projects.length}</span></h2></div></div>
-        {projects.length ? <div className="projects-table"><div className="projects-table-head"><span>LIBRARY</span><span>PAPERS</span><span>STAGES</span><span>CREATED</span><span /></div>{projects.map((project, index) => <button className="project-row" key={project.id} onClick={() => { setActiveProjectId(project.id); setActiveListId(project.lists[0]?.id ?? null) }} style={{ animationDelay: `${index * 45}ms` }}><span className="project-title-cell"><span className="project-icon"><ClipboardList size={17} /></span><span><strong>{project.name}</strong><small>{project.lists[0]?.name ?? 'No stages yet'}</small></span></span><span className="project-number">{paperCount(project).toLocaleString()}</span><span className="project-number">{project.lists.length}</span><span className="project-date">{new Date(project.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span><span className="row-arrow"><ArrowRight size={16} /></span></button>)}</div> : <div className="empty-projects"><div className="empty-graphic"><span className="empty-sheet"><FileSpreadsheet size={23} /></span><span className="empty-spark"><Sparkles size={16} /></span></div><span className="section-kicker">A GOOD PLACE TO BEGIN</span><h3>Start with a research question.</h3><p>Create a library, bring in your search results, and shape a screening workflow that stays easy to review.</p><button className="button button-primary" onClick={() => setCreatingProject(true)}><FolderPlus size={16} /> Create your first library</button></div>}
+        {projects.length ? (
+          <div className="projects-table">
+            <div className="projects-table-head">
+              <span>LIBRARY</span>
+              <span>PAPERS</span>
+              <span>STAGES</span>
+              <span>CREATED</span>
+              <span>ACTIONS</span>
+            </div>
+            {projects.map((project, index) => (
+              <div
+                className="project-row"
+                key={project.id}
+                onClick={() => { setActiveProjectId(project.id); setActiveListId(project.lists[0]?.id ?? null) }}
+                style={{ animationDelay: `${index * 45}ms` }}
+                role="button"
+                tabIndex={0}
+              >
+                <span className="project-title-cell">
+                  <span className="project-icon"><ClipboardList size={17} /></span>
+                  <span>
+                    <strong>{project.name}</strong>
+                    <small>{project.lists[0]?.name ?? 'No stages yet'}</small>
+                  </span>
+                </span>
+                <span className="project-number">{paperCount(project).toLocaleString()}</span>
+                <span className="project-number">{project.lists.length}</span>
+                <span className="project-date">{new Date(project.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <span className="project-actions-cell">
+                  <button
+                    type="button"
+                    className="icon-button row-delete-btn"
+                    title={`Delete ${project.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setProjectToDelete(project)
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                  <span className="row-arrow"><ArrowRight size={16} /></span>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-projects">
+            <div className="empty-graphic">
+              <span className="empty-sheet"><FileSpreadsheet size={23} /></span>
+              <span className="empty-spark"><Sparkles size={16} /></span>
+            </div>
+            <span className="section-kicker">A GOOD PLACE TO BEGIN</span>
+            <h3>Start with a research question.</h3>
+            <p>Create a library, bring in your search results, and shape a screening workflow that stays easy to review.</p>
+            <button className="button button-primary" onClick={() => setCreatingProject(true)}><FolderPlus size={16} /> Create your first library</button>
+          </div>
+        )}
         <div className="bottom-caption"><span>SYNTHESYS / 01</span><span>MAKE THE EVIDENCE TRACEABLE</span></div>
       </section> : <section className="review-page page-enter">
         <div className="review-dashboard-header">
@@ -992,9 +1091,19 @@ function App() {
               <h1 className="review-title">{activeProject.name}</h1>
               <p className="review-subtitle">A working evidence set, one decision at a time.</p>
             </div>
-            <button className="button button-primary upload-top" onClick={() => fileInputRef.current?.click()}>
-              <Upload size={16} /> Upload papers
-            </button>
+            <div className="review-heading-actions">
+              <button
+                type="button"
+                className="button button-quiet button-danger"
+                onClick={() => setProjectToDelete(activeProject)}
+                title="Delete this library"
+              >
+                <Trash2 size={15} /> Delete library
+              </button>
+              <button className="button button-primary upload-top" onClick={() => fileInputRef.current?.click()}>
+                <Upload size={16} /> Upload papers
+              </button>
+            </div>
             <input ref={fileInputRef} className="visually-hidden" type="file" accept=".csv,.xlsx" onChange={(event) => void handleFile(event.target.files?.[0])} />
           </div>
           <div className="stats-strip">
@@ -1018,7 +1127,7 @@ function App() {
               <span>Title + abstract<br />screening</span>
             </div>
           </div>
-          
+
           {/* Stage Navigation Tabs */}
           <div className="list-navigation">
             <div className="list-tabs" role="tablist" aria-label="Library stages">
@@ -1059,215 +1168,215 @@ function App() {
             <div className="list-toolbar">
               <div className="list-title-wrap">
                 <h2>{activeList.name}</h2>
-              
-              {/* Stage Type Tag */}
-              {activeList.stageType === 'screening' && (
-                <span className="stage-badge-pill screening-badge-pill" title={`Inclusion: ${activeList.inclusionCriteria || 'Configured'}`}>
-                  <Sparkles size={11} /> AI Screening Stage
-                </span>
-              )}
-              {activeList.stageType === 'extraction' && (
-                <span className="stage-badge-pill extraction-badge-pill" title={`${activeExtractionFields.length} extraction columns active`}>
-                  <Table2 size={11} /> AI Extraction ({activeExtractionFields.length} fields)
-                </span>
-              )}
-              {activeList.stageType === 'synthesis' && (
-                <span className="stage-badge-pill synthesis-badge-pill" title="Systematic literature review synthesis workspace">
-                  <BookOpen size={11} /> AI Synthesis Stage
-                </span>
-              )}
 
-              {/* Stage Settings / Configure Button */}
-              <button
-                type="button"
-                className="stage-settings-btn"
-                onClick={() => openEditStageModal(activeList)}
-                title="Configure stage purpose, screening criteria, data extraction columns, or synthesis focus"
-              >
-                <SlidersHorizontal size={13} /> Stage Settings
-              </button>
+                {/* Stage Type Tag */}
+                {activeList.stageType === 'screening' && (
+                  <span className="stage-badge-pill screening-badge-pill" title={`Inclusion: ${activeList.inclusionCriteria || 'Configured'}`}>
+                    <Sparkles size={11} /> AI Screening Stage
+                  </span>
+                )}
+                {activeList.stageType === 'extraction' && (
+                  <span className="stage-badge-pill extraction-badge-pill" title={`${activeExtractionFields.length} extraction columns active`}>
+                    <Table2 size={11} /> AI Extraction ({activeExtractionFields.length} fields)
+                  </span>
+                )}
+                {activeList.stageType === 'synthesis' && (
+                  <span className="stage-badge-pill synthesis-badge-pill" title="Systematic literature review synthesis workspace">
+                    <BookOpen size={11} /> AI Synthesis Stage
+                  </span>
+                )}
+
+                {/* Stage Settings / Configure Button */}
+                <button
+                  type="button"
+                  className="stage-settings-btn"
+                  onClick={() => openEditStageModal(activeList)}
+                  title="Configure stage purpose, screening criteria, data extraction columns, or synthesis focus"
+                >
+                  <SlidersHorizontal size={13} /> Stage Settings
+                </button>
+              </div>
+
+              {activeList.stageType !== 'synthesis' && (
+                <div className="toolbar-actions">
+                  <div className="visibility-filter-tabs" role="group" aria-label="Filter visibility">
+                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'included' ? 'active' : ''}`} onClick={() => setVisibilityFilter('included')} title="Show papers matching inclusion score and manually shown"><Eye size={13} /><span>Included</span><span className="tab-pill-count">{includedCount}</span></button>
+                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'hidden' ? 'active' : ''}`} onClick={() => setVisibilityFilter('hidden')} title="Show papers below score threshold or manually hidden"><EyeOff size={13} /><span>Hidden</span><span className="tab-pill-count">{hiddenCount}</span></button>
+                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'all' ? 'active' : ''}`} onClick={() => setVisibilityFilter('all')} title="Show all papers in this stage"><span>All</span><span className="tab-pill-count">{resolvedActiveListPapers.length}</span></button>
+                  </div>
+                  {resolvedActiveListPapers.some((paper) => paper.score !== undefined) && (
+                    <label className="score-filter">
+                      <span>INCLUSION SCORE</span>
+                      <input type="range" min="0" max="10" step="1" value={activeList.minScore} onChange={(event) => updateProject(activeProject.id, (project) => ({ ...project, lists: project.lists.map((list) => list.id === activeList.id ? { ...list, minScore: Number(event.target.value) } : list) }))} />
+                      <strong>{activeList.minScore}+</strong>
+                    </label>
+                  )}
+                  <label className="search-box"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search papers" aria-label="Search papers" /><kbd>/</kbd></label>
+                </div>
+              )}
             </div>
 
-            {activeList.stageType !== 'synthesis' && (
-              <div className="toolbar-actions">
-                <div className="visibility-filter-tabs" role="group" aria-label="Filter visibility">
-                  <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'included' ? 'active' : ''}`} onClick={() => setVisibilityFilter('included')} title="Show papers matching inclusion score and manually shown"><Eye size={13} /><span>Included</span><span className="tab-pill-count">{includedCount}</span></button>
-                  <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'hidden' ? 'active' : ''}`} onClick={() => setVisibilityFilter('hidden')} title="Show papers below score threshold or manually hidden"><EyeOff size={13} /><span>Hidden</span><span className="tab-pill-count">{hiddenCount}</span></button>
-                  <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'all' ? 'active' : ''}`} onClick={() => setVisibilityFilter('all')} title="Show all papers in this stage"><span>All</span><span className="tab-pill-count">{resolvedActiveListPapers.length}</span></button>
-                </div>
-                {resolvedActiveListPapers.some((paper) => paper.score !== undefined) && (
-                  <label className="score-filter">
-                    <span>INCLUSION SCORE</span>
-                    <input type="range" min="0" max="10" step="1" value={activeList.minScore} onChange={(event) => updateProject(activeProject.id, (project) => ({ ...project, lists: project.lists.map((list) => list.id === activeList.id ? { ...list, minScore: Number(event.target.value) } : list) }))} />
-                    <strong>{activeList.minScore}+</strong>
-                  </label>
-                )}
-                <label className="search-box"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search papers" aria-label="Search papers" /><kbd>/</kbd></label>
-              </div>
+            {error && !copyOpen && !stageModalOpen && (
+              <div className="inline-error"><span>{error}</span><button className="icon-button" title="Dismiss" onClick={() => setError('')}><X size={15} /></button></div>
             )}
-          </div>
 
-          {error && !copyOpen && !stageModalOpen && (
-            <div className="inline-error"><span>{error}</span><button className="icon-button" title="Dismiss" onClick={() => setError('')}><X size={15} /></button></div>
-          )}
-
-          {activeList.stageType === 'synthesis' ? (
-            <SynthesisStudio
-              list={activeList}
-              papers={resolvedActiveListPapers}
-              onUpdateSynthesis={(newText, newPrompt) => {
-                updateProject(activeProject.id, (project) => ({
-                  ...project,
-                  lists: project.lists.map((l) =>
-                    l.id === activeList.id
-                      ? { ...l, synthesisText: newText, ...(newPrompt !== undefined ? { synthesisPrompt: newPrompt } : {}) }
-                      : l
-                  ),
-                }))
-              }}
-              onOpenManuscript={(paper) => setManuscriptPaper(paper)}
-              sourceStageName={activeProject.lists.find((l) => l.id !== activeList.id)?.name || 'Source Stage'}
-            />
-          ) : (
-            <>
-              {resolvedActiveListPapers.length ? (
-                <div className="papers-table-wrap">
-                  <table className="papers-table">
-                    <thead>
-                      <tr>
-                        <th className="check-column"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Select all visible papers" /></th>
-                        <th className="visibility-column" title="Toggle visibility"><Eye size={13} /></th>
-                        <th className="paper-heading">PAPER <span>{visiblePapers.length === resolvedActiveListPapers.length ? resolvedActiveListPapers.length.toLocaleString() : `${visiblePapers.length} of ${resolvedActiveListPapers.length}`}</span></th>
-                        <th className="year-heading">YEAR</th>
-                        <th className="journal-heading">SOURCE</th>
-                        {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => p.score !== undefined)) && (
-                          <th className="score-heading">INCLUSION</th>
-                        )}
-                        <th className="manuscript-action-heading">MANUSCRIPT</th>
-                        {/* Dynamic Data Extraction Columns directly in the table */}
-                        {activeExtractionFields.map((f) => (
-                          <th key={f.name} className="extracted-col-header" title={f.description || f.name}>
-                            <div className="extracted-col-head-inner">
-                              <Sparkles size={10} className="col-sparkle" />
-                              <span>{f.name.toUpperCase()}</span>
-                            </div>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visiblePapers.slice(0, 250).map((paper) => {
-                        const included = isPaperIncluded(paper, activeList.minScore)
-                        return (
-                          <tr key={paper.id} className={`${selectedIds.has(paper.id) ? 'row-selected' : ''} ${included ? '' : 'row-hidden'}`}>
-                            <td className="check-column">
-                              <input type="checkbox" checked={selectedIds.has(paper.id)} onChange={() => togglePaper(paper.id)} aria-label={`Select ${paper.title}`} />
-                            </td>
-                            <td className="visibility-cell">
-                              <button type="button" className={`row-eye-button ${included ? (paper.manualVisibility === 'show' ? 'manual-show' : 'visible') : 'hidden'}`} onClick={() => togglePaperVisibility(paper.id)} title={included ? (paper.manualVisibility === 'show' ? 'Manually shown override (click to hide)' : 'Shown in stage (click to hide)') : 'Hidden from stage (click to show)'} aria-label={included ? `Hide ${paper.title}` : `Show ${paper.title}`}>
-                                {included ? <Eye size={15} /> : <EyeOff size={15} />}
-                              </button>
-                            </td>
-                            <td className="paper-cell">
-                              <a className="paper-title" href={paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : undefined)} target="_blank" rel="noreferrer" onClick={(event) => { if (!paper.url && !paper.doi) event.preventDefault() }}>{paper.title}</a>
-                              <span className="paper-authors">{paper.authors || 'Author not listed'}{paper.doi && <span className="doi-label">DOI {paper.doi}</span>}{paper.manualVisibility === 'show' && <span className="manual-vis-badge show-badge"><Eye size={10} /> Force Shown</span>}{paper.manualVisibility === 'hide' && <span className="manual-vis-badge hide-badge"><EyeOff size={10} /> Manually Hidden</span>}</span>
-                              {paper.abstract && <details className="abstract-details"><summary>Abstract</summary><p>{paper.abstract}</p></details>}
-                            </td>
-                            <td className="year-cell">{paper.year || '—'}</td>
-                            <td className="journal-cell">{paper.journal || '—'}</td>
-                            {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => p.score !== undefined)) && (
-                              <td className="score-cell">
-                                {paper.score !== undefined ? (
-                                  <>
-                                    <span className={`score-pill ${paper.score >= 8 ? 'score-high' : paper.score >= 5 ? 'score-mid' : 'score-low'}`}>{paper.score}<span>/10</span></span>
-                                    {paper.rationale && <span className="score-reason" title={paper.rationale}>AI screened</span>}
-                                  </>
-                                ) : (
-                                  <span className="not-screened">Not screened</span>
-                                )}
+            {activeList.stageType === 'synthesis' ? (
+              <SynthesisStudio
+                list={activeList}
+                papers={resolvedActiveListPapers}
+                onUpdateSynthesis={(newText, newPrompt) => {
+                  updateProject(activeProject.id, (project) => ({
+                    ...project,
+                    lists: project.lists.map((l) =>
+                      l.id === activeList.id
+                        ? { ...l, synthesisText: newText, ...(newPrompt !== undefined ? { synthesisPrompt: newPrompt } : {}) }
+                        : l
+                    ),
+                  }))
+                }}
+                onOpenManuscript={(paper) => setManuscriptPaper(paper)}
+                sourceStageName={activeProject.lists.find((l) => l.id !== activeList.id)?.name || 'Source Stage'}
+              />
+            ) : (
+              <>
+                {resolvedActiveListPapers.length ? (
+                  <div className="papers-table-wrap">
+                    <table className="papers-table">
+                      <thead>
+                        <tr>
+                          <th className="check-column"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Select all visible papers" /></th>
+                          <th className="visibility-column" title="Toggle visibility"><Eye size={13} /></th>
+                          <th className="paper-heading">PAPER <span>{visiblePapers.length === resolvedActiveListPapers.length ? resolvedActiveListPapers.length.toLocaleString() : `${visiblePapers.length} of ${resolvedActiveListPapers.length}`}</span></th>
+                          <th className="year-heading">YEAR</th>
+                          <th className="journal-heading">SOURCE</th>
+                          {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => p.score !== undefined)) && (
+                            <th className="score-heading">INCLUSION</th>
+                          )}
+                          <th className="manuscript-action-heading">MANUSCRIPT</th>
+                          {/* Dynamic Data Extraction Columns directly in the table */}
+                          {activeExtractionFields.map((f) => (
+                            <th key={f.name} className="extracted-col-header" title={f.description || f.name}>
+                              <div className="extracted-col-head-inner">
+                                <Sparkles size={10} className="col-sparkle" />
+                                <span>{f.name.toUpperCase()}</span>
+                              </div>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visiblePapers.slice(0, 250).map((paper) => {
+                          const included = isPaperIncluded(paper, activeList.minScore)
+                          return (
+                            <tr key={paper.id} className={`${selectedIds.has(paper.id) ? 'row-selected' : ''} ${included ? '' : 'row-hidden'}`}>
+                              <td className="check-column">
+                                <input type="checkbox" checked={selectedIds.has(paper.id)} onChange={() => togglePaper(paper.id)} aria-label={`Select ${paper.title}`} />
                               </td>
-                            )}
-                            <td className="manuscript-actions-cell">
-                              <button className="row-manuscript-button" type="button" onClick={() => chooseManuscriptFile(paper.id)} disabled={uploadingPaperId === paper.id} title={paper.manuscript ? 'Replace manuscript PDF' : 'Attach manuscript PDF'} aria-label={paper.manuscript ? `Replace PDF for ${paper.title}` : `Attach PDF for ${paper.title}`}>
-                                {uploadingPaperId === paper.id ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}
-                              </button>
-                              {paper.manuscript && (
-                                <button className="row-manuscript-button attached" type="button" onClick={() => setManuscriptPaper(paper)} title="View parsed manuscript" aria-label={`View manuscript for ${paper.title}`}><FileText size={15} /></button>
-                              )}
-                            </td>
-                            {/* Dynamic Extraction Cells */}
-                            {activeExtractionFields.map((f) => {
-                              const raw = paper.extractedData ? paper.extractedData[f.name] : undefined
-                              const val = getExtractedFieldValue(raw)
-                              return (
-                                <td key={f.name} className="extracted-col-cell">
-                                  {val ? (
-                                    <div className="extracted-cell-value" title={val}>{val}</div>
-                                  ) : paper.manuscript ? (
-                                    <span className="extracted-cell-pending" title="Manuscript attached; ready for extraction">Pending copy</span>
+                              <td className="visibility-cell">
+                                <button type="button" className={`row-eye-button ${included ? (paper.manualVisibility === 'show' ? 'manual-show' : 'visible') : 'hidden'}`} onClick={() => togglePaperVisibility(paper.id)} title={included ? (paper.manualVisibility === 'show' ? 'Manually shown override (click to hide)' : 'Shown in stage (click to hide)') : 'Hidden from stage (click to show)'} aria-label={included ? `Hide ${paper.title}` : `Show ${paper.title}`}>
+                                  {included ? <Eye size={15} /> : <EyeOff size={15} />}
+                                </button>
+                              </td>
+                              <td className="paper-cell">
+                                <a className="paper-title" href={paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : undefined)} target="_blank" rel="noreferrer" onClick={(event) => { if (!paper.url && !paper.doi) event.preventDefault() }}>{paper.title}</a>
+                                <span className="paper-authors">{paper.authors || 'Author not listed'}{paper.doi && <span className="doi-label">DOI {paper.doi}</span>}{paper.manualVisibility === 'show' && <span className="manual-vis-badge show-badge"><Eye size={10} /> Force Shown</span>}{paper.manualVisibility === 'hide' && <span className="manual-vis-badge hide-badge"><EyeOff size={10} /> Manually Hidden</span>}</span>
+                                {paper.abstract && <details className="abstract-details"><summary>Abstract</summary><p>{paper.abstract}</p></details>}
+                              </td>
+                              <td className="year-cell">{paper.year || '—'}</td>
+                              <td className="journal-cell">{paper.journal || '—'}</td>
+                              {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => p.score !== undefined)) && (
+                                <td className="score-cell">
+                                  {paper.score !== undefined ? (
+                                    <>
+                                      <span className={`score-pill ${paper.score >= 8 ? 'score-high' : paper.score >= 5 ? 'score-mid' : 'score-low'}`}>{paper.score}<span>/10</span></span>
+                                      {paper.rationale && <span className="score-reason" title={paper.rationale}>AI screened</span>}
+                                    </>
                                   ) : (
-                                    <span className="extracted-cell-nopdf" title="Upload manuscript PDF to extract data">No PDF</span>
+                                    <span className="not-screened">Not screened</span>
                                   )}
                                 </td>
-                              )
-                            })}
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                  {visiblePapers.length > 250 && <div className="table-limit-note">Showing the first 250 matches. Narrow the search to see more.</div>}
-                  {!visiblePapers.length && <div className="no-matches"><Search size={18} /><span>{visibilityFilter === 'hidden' ? 'No hidden papers in this stage.' : 'No papers match this search, score threshold, and visibility filter.'}</span></div>}
-                </div>
-              ) : (
-                <div className="empty-list">
-                  <span className="empty-list-icon"><FileSpreadsheet size={22} /></span>
-                  <div>
-                    <h3>{activeList.papers.length ? 'No papers at this score' : 'Bring in your search results or copy papers here'}</h3>
-                    <p>{activeList.papers.length ? `No screened papers score ${activeList.minScore} or higher. Lower the threshold to review more.` : 'Upload a CSV or Excel file, or copy papers from an earlier stage.'}</p>
+                              )}
+                              <td className="manuscript-actions-cell">
+                                <button className="row-manuscript-button" type="button" onClick={() => chooseManuscriptFile(paper.id)} disabled={uploadingPaperId === paper.id} title={paper.manuscript ? 'Replace manuscript PDF' : 'Attach manuscript PDF'} aria-label={paper.manuscript ? `Replace PDF for ${paper.title}` : `Attach PDF for ${paper.title}`}>
+                                  {uploadingPaperId === paper.id ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}
+                                </button>
+                                {paper.manuscript && (
+                                  <button className="row-manuscript-button attached" type="button" onClick={() => setManuscriptPaper(paper)} title="View parsed manuscript" aria-label={`View manuscript for ${paper.title}`}><FileText size={15} /></button>
+                                )}
+                              </td>
+                              {/* Dynamic Extraction Cells */}
+                              {activeExtractionFields.map((f) => {
+                                const raw = paper.extractedData ? paper.extractedData[f.name] : undefined
+                                const val = getExtractedFieldValue(raw)
+                                return (
+                                  <td key={f.name} className="extracted-col-cell">
+                                    {val ? (
+                                      <div className="extracted-cell-value" title={val}>{val}</div>
+                                    ) : paper.manuscript ? (
+                                      <span className="extracted-cell-pending" title="Manuscript attached; ready for extraction">Pending copy</span>
+                                    ) : (
+                                      <span className="extracted-cell-nopdf" title="Upload manuscript PDF to extract data">No PDF</span>
+                                    )}
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    {visiblePapers.length > 250 && <div className="table-limit-note">Showing the first 250 matches. Narrow the search to see more.</div>}
+                    {!visiblePapers.length && <div className="no-matches"><Search size={18} /><span>{visibilityFilter === 'hidden' ? 'No hidden papers in this stage.' : 'No papers match this search, score threshold, and visibility filter.'}</span></div>}
                   </div>
-                  {activeList.papers.length ? (
-                    <button className="button button-secondary" onClick={() => updateProject(activeProject.id, (project) => ({ ...project, lists: project.lists.map((list) => list.id === activeList.id ? { ...list, minScore: 0 } : list) }))}>Show all scores</button>
-                  ) : (
-                    <button className="button button-secondary" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Choose file</button>
-                  )}
-                </div>
-              )}
+                ) : (
+                  <div className="empty-list">
+                    <span className="empty-list-icon"><FileSpreadsheet size={22} /></span>
+                    <div>
+                      <h3>{activeList.papers.length ? 'No papers at this score' : 'Bring in your search results or copy papers here'}</h3>
+                      <p>{activeList.papers.length ? `No screened papers score ${activeList.minScore} or higher. Lower the threshold to review more.` : 'Upload a CSV or Excel file, or copy papers from an earlier stage.'}</p>
+                    </div>
+                    {activeList.papers.length ? (
+                      <button className="button button-secondary" onClick={() => updateProject(activeProject.id, (project) => ({ ...project, lists: project.lists.map((list) => list.id === activeList.id ? { ...list, minScore: 0 } : list) }))}>Show all scores</button>
+                    ) : (
+                      <button className="button button-secondary" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Choose file</button>
+                    )}
+                  </div>
+                )}
 
-              {/* Interactive Table Footer with Working CSV and XLSX Downloads */}
-              <div className="table-footer">
-                <span>
-                  Showing {Math.min(visiblePapers.length, 250).toLocaleString()} of {resolvedActiveListPapers.length.toLocaleString()} papers
-                  {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ''}
-                </span>
-                <div className="table-export-actions">
-                  <span className="export-label">EXPORT STAGE:</span>
-                  <button
-                    type="button"
-                    className="export-btn"
-                    onClick={() => void exportStageData('csv')}
-                    title={`Download ${visiblePapers.length} papers from ${activeList.name} as CSV`}
-                    disabled={visiblePapers.length === 0}
-                  >
-                    <ArrowDownToLine size={11} />
-                    <span>CSV</span>
-                  </button>
-                  <span className="export-divider">·</span>
-                  <button
-                    type="button"
-                    className="export-btn"
-                    onClick={() => void exportStageData('xlsx')}
-                    title={`Download ${visiblePapers.length} papers from ${activeList.name} as Excel workbook (.xlsx)`}
-                    disabled={visiblePapers.length === 0}
-                  >
-                    <ArrowDownToLine size={11} />
-                    <span>XLSX (Excel)</span>
-                  </button>
+                {/* Interactive Table Footer with Working CSV and XLSX Downloads */}
+                <div className="table-footer">
+                  <span>
+                    Showing {Math.min(visiblePapers.length, 250).toLocaleString()} of {resolvedActiveListPapers.length.toLocaleString()} papers
+                    {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ''}
+                  </span>
+                  <div className="table-export-actions">
+                    <span className="export-label">EXPORT STAGE:</span>
+                    <button
+                      type="button"
+                      className="export-btn"
+                      onClick={() => void exportStageData('csv')}
+                      title={`Download ${visiblePapers.length} papers from ${activeList.name} as CSV`}
+                      disabled={visiblePapers.length === 0}
+                    >
+                      <ArrowDownToLine size={11} />
+                      <span>CSV</span>
+                    </button>
+                    <span className="export-divider">·</span>
+                    <button
+                      type="button"
+                      className="export-btn"
+                      onClick={() => void exportStageData('xlsx')}
+                      title={`Download ${visiblePapers.length} papers from ${activeList.name} as Excel workbook (.xlsx)`}
+                      disabled={visiblePapers.length === 0}
+                    >
+                      <ArrowDownToLine size={11} />
+                      <span>XLSX (Excel)</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
-        </> : <div className="empty-list"><h3>Create a stage to begin screening.</h3></div>}
+              </>
+            )}
+          </> : <div className="empty-list"><h3>Create a stage to begin screening.</h3></div>}
 
           <div className="bottom-caption"><span>SYNTHESYS / {String(activeProject.lists.findIndex((list) => list.id === activeListId) + 1).padStart(2, '0')}</span><span>DECISIONS STAY WITH THE PAPER</span></div>
         </div>
@@ -1289,6 +1398,30 @@ function App() {
 
     {/* Create Library Modal */}
     {creatingProject && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreatingProject(false) }}><form className="modal project-modal" onSubmit={(event) => { event.preventDefault(); createProject() }}><div className="modal-topline"><span className="modal-icon"><FolderPlus size={17} /></span><button type="button" className="icon-button" onClick={() => setCreatingProject(false)} title="Close"><X size={17} /></button></div><span className="section-kicker">NEW LIBRARY</span><h2>Create a library</h2><p className="modal-description">Give this library a name. You can organize papers into screening stages inside it.</p><label className="field-label" htmlFor="project-name">LIBRARY NAME</label><input id="project-name" className="text-field" autoFocus maxLength={80} placeholder="e.g. Digital health interventions" value={projectName} onChange={(event) => setProjectName(event.target.value)} /><div className="modal-actions"><button type="button" className="button button-quiet" onClick={() => setCreatingProject(false)}>Cancel</button><button className="button button-primary" type="submit" disabled={!projectName.trim()}><Plus size={15} /> Create library</button></div></form></div>}
+
+    {/* Delete Library Confirmation Modal */}
+    {projectToDelete && (
+      <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setProjectToDelete(null) }}>
+        <section className="modal delete-modal" aria-labelledby="delete-library-title">
+          <div className="modal-topline">
+            <span className="modal-icon modal-icon-danger"><Trash2 size={18} /></span>
+            <button type="button" className="icon-button" onClick={() => setProjectToDelete(null)} title="Close"><X size={17} /></button>
+          </div>
+          <span className="section-kicker section-kicker-danger">PERMANENT ACTION</span>
+          <h2 id="delete-library-title">Delete Library?</h2>
+          <p className="modal-description">
+            Are you sure you want to delete <strong>{projectToDelete.name}</strong>?
+          </p>
+          <div className="delete-modal-warning">
+            This will permanently remove the library, all <strong>{projectToDelete.lists.length}</strong> {projectToDelete.lists.length === 1 ? 'stage' : 'stages'}, and <strong>{paperCount(projectToDelete).toLocaleString()}</strong> associated papers. This action cannot be undone.
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="button button-quiet" onClick={() => setProjectToDelete(null)}>Cancel</button>
+            <button type="button" className="button button-danger-solid" onClick={() => void confirmDeleteProject()}><Trash2 size={15} /> Delete library</button>
+          </div>
+        </section>
+      </div>
+    )}
 
     {/* Stage Configuration Modal (Create / Edit Stage) */}
     {stageModalOpen && (

@@ -254,6 +254,18 @@ class ManuscriptApiTests(unittest.TestCase):
         self.assertIn("Systematic Literature Review", data["synthesis"])
         self.assertIn("Smith et al.", data["synthesis"])
 
+    def test_delete_project_endpoint(self):
+        client = TestClient(backend.app)
+        get_res = client.get("/api/projects")
+        self.assertEqual(len(get_res.json()), 1)
+
+        del_res = client.delete("/api/projects/project-1")
+        self.assertEqual(del_res.status_code, 200)
+        self.assertEqual(del_res.json(), {"status": "deleted", "id": "project-1"})
+
+        get_res_after = client.get("/api/projects")
+        self.assertEqual(len(get_res_after.json()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

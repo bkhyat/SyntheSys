@@ -317,6 +317,12 @@ def replace_projects(projects: list[dict[str, Any]]) -> None:
         connection.execute("DELETE FROM papers WHERE id NOT IN (SELECT paper_id FROM list_papers)")
 
 
+def delete_project(project_id: str) -> None:
+    with session() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        connection.execute("DELETE FROM papers WHERE id NOT IN (SELECT paper_id FROM list_papers)")
+
 
 def paper_exists(paper_id: str) -> bool:
     with session() as connection:

@@ -101,7 +101,7 @@ npm run dev
 - **Frontend**: React 18, TypeScript, Vite, KaTeX (LaTeX math rendering), Lucide Icons, Vanilla CSS Design System
 - **Backend**: FastAPI, Python 3.10+, Uvicorn, SQLite3, HTTPX
 - **Document & PDF Processing**: `pdfplumber`, `pypdf`, `Pillow`
-- **AI / LLM Integration**: Google Gemini 2.5 Flash API (`google-genai` / REST), Ollama
+- **AI / LLM Integration**: Google Gemini 3.8 Flash API (`google-genai` / REST), Ollama
 
 ---
 
