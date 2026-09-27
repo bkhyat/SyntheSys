@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Fieldnote Server Boot & Run Script
+# SyntheSys Server Boot & Run Script
 # Boots the FastAPI backend and Vite frontend development server.
 # ==============================================================================
 
@@ -42,7 +42,7 @@ BACKEND_PID=""
 FRONTEND_PID=""
 
 show_help() {
-  echo -e "${BOLD}Fieldnote Server Runner${NC}"
+  echo -e "${BOLD}SyntheSys Server Runner${NC}"
   echo ""
   echo "Usage: ./start.sh [options]"
   echo ""
@@ -170,7 +170,7 @@ check_port() {
   fi
 }
 
-info "Initializing Fieldnote environment..."
+info "Initializing SyntheSys environment..."
 setup_env
 setup_python
 setup_node
@@ -186,10 +186,11 @@ if [[ "$MODE" == "install" ]]; then
 fi
 
 echo -e "${CYAN}${BOLD}"
-echo "  ___ _     _     _            _       "
-echo " | __(_)___| | __| |_ _  ___ _| |_ ___ "
-echo " | _|| / -_) |/ _\` | ' \/ _ \  _| -_)"
-echo " |_| |_\___|_|\__,_|_||_\___/\__\___| "
+echo "   ___             _   _          ___            "
+echo "  / __|_  _ _ _  _| |_| |_  ___  / __|_  _ ___   "
+echo "  \__ \ || | ' \|  _| ' \/ -_) \__ \ || (_-< _ \ "
+echo "  |___/\_, |_||_|\__|_||_\___| |___/\_, /__/\__/ "
+echo "       |__/                         |__/         "
 echo -e "${NC}"
 
 trap cleanup SIGINT SIGTERM EXIT
@@ -209,7 +210,7 @@ else
   check_port "$BACKEND_PORT" "FastAPI Backend"
   check_port "$FRONTEND_PORT" "Vite Frontend"
 
-  echo -e "${BOLD}Starting Fieldnote Services...${NC}"
+  echo -e "${BOLD}Starting SyntheSys Services...${NC}"
   echo -e "  ${GREEN}➜${NC} Web App:   ${BOLD}http://localhost:${FRONTEND_PORT}${NC}"
   echo -e "  ${GREEN}➜${NC} API Docs:  ${BOLD}http://localhost:${BACKEND_PORT}/docs${NC}"
   echo -e "  ${GREEN}➜${NC} Backend:   ${BOLD}http://localhost:${BACKEND_PORT}${NC}"

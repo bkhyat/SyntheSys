@@ -42,7 +42,7 @@ MANUSCRIPT_ROOT = Path(
     os.getenv("FIELDNOTE_MANUSCRIPT_DIR", Path(__file__).resolve().parent.parent / "data" / "manuscripts")
 )
 
-app = FastAPI(title="Fieldnote Screening API", version="0.1.0")
+app = FastAPI(title="SyntheSys Screening & Synthesis API", version="0.1.0")
 
 
 class ManuscriptMetadataInput(BaseModel):

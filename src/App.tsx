@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownToLine, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, ClipboardList, Eye, EyeOff, FileSpreadsheet, FileText, FlaskConical, FolderPlus, ListFilter, LoaderCircle, Plus, Search, SlidersHorizontal, Sparkles, Table2, Trash2, Upload, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, ClipboardList, Eye, EyeOff, FileSpreadsheet, FileText, FolderPlus, ListFilter, LoaderCircle, Plus, Search, SlidersHorizontal, Sparkles, Table2, Trash2, Upload, X } from 'lucide-react'
 import Papa from 'papaparse'
 import readXlsxFile from 'read-excel-file/browser'
 import writeXlsxFile from 'write-excel-file/browser'
@@ -950,24 +950,29 @@ function App() {
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <button className="brand" onClick={() => { setActiveProjectId(null); setActiveListId(null) }} aria-label="Fieldnote home"><span className="brand-mark"><FlaskConical size={17} strokeWidth={2.2} /></span><span>fieldnote<span className="brand-period">.</span></span></button>
+      <button className="brand" onClick={() => { setActiveProjectId(null); setActiveListId(null) }} aria-label="SyntheSys home">
+        <span className="brand-mark">
+          <img src="/SyntheSys.jpeg" alt="SyntheSys logo" className="brand-logo-img" />
+        </span>
+        <span>SyntheSys<span className="brand-period">.</span></span>
+      </button>
       <div className="side-label">WORKSPACE</div>
       <button className={`nav-link ${!activeProject ? 'active' : ''}`} onClick={() => { setActiveProjectId(null); setActiveListId(null) }}><BookOpen size={16} /><span>All libraries</span><span className="nav-count">{projects.length}</span></button>
       <div className="side-label project-label">YOUR LIBRARIES</div>
       <div className="project-nav">{projects.map((project) => <button key={project.id} className={`nav-link project-nav-link ${project.id === activeProjectId ? 'active' : ''}`} onClick={() => { setActiveProjectId(project.id); setActiveListId(project.lists[0]?.id ?? null) }}><span className="project-dot" /><span className="project-nav-name">{project.name}</span><span className="nav-count">{paperCount(project)}</span></button>)}</div>
       <button className="new-project-link" onClick={() => setCreatingProject(true)}><Plus size={15} /> New library</button>
-      <div className="sidebar-bottom"><div className="sidebar-note"><span className="note-symbol">fn</span><span>Evidence, organized.</span></div><div className="sidebar-version">REVIEW WORKSPACE <span>v0.1</span></div></div>
+      <div className="sidebar-bottom"><div className="sidebar-note"><span className="note-symbol"><img src="/SyntheSys.ico" alt="SyntheSys icon" className="sidebar-note-ico" /></span><span>Evidence, synthesized.</span></div><div className="sidebar-version">SYNTHESYS <span>v0.1</span></div></div>
     </aside>
 
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb"><span>Workspace</span><ArrowRight size={13} /><strong>{activeProject?.name ?? 'All libraries'}</strong></div><div className="topbar-right"><span className="local-indicator"><span /> {databaseStatus}</span><button className="icon-button help-button" title="About Fieldnote"><CircleHelp size={17} /></button></div></header>
+      <header className="topbar"><div className="breadcrumb"><span>Workspace</span><ArrowRight size={13} /><strong>{activeProject?.name ?? 'All libraries'}</strong></div><div className="topbar-right"><span className="local-indicator"><span /> {databaseStatus}</span><button className="icon-button help-button" title="About SyntheSys"><CircleHelp size={17} /></button></div></header>
 
       {!activeProject ? <section className="projects-page page-enter">
         <div className="page-eyebrow"><span className="eyebrow-line" /> EVIDENCE REVIEW WORKSPACE</div>
         <div className="page-heading-row"><div><h1>Your research,<br /><em>in clear stages.</em></h1><p className="page-intro">Build a transparent path from search results to a focused evidence set.</p></div><button className="button button-primary" onClick={() => setCreatingProject(true)}><Plus size={16} /> New library</button></div>
         <div className="section-heading"><div><span className="section-kicker">COLLECTION</span><h2>Libraries <span className="heading-count">{projects.length}</span></h2></div></div>
         {projects.length ? <div className="projects-table"><div className="projects-table-head"><span>LIBRARY</span><span>PAPERS</span><span>STAGES</span><span>CREATED</span><span /></div>{projects.map((project, index) => <button className="project-row" key={project.id} onClick={() => { setActiveProjectId(project.id); setActiveListId(project.lists[0]?.id ?? null) }} style={{ animationDelay: `${index * 45}ms` }}><span className="project-title-cell"><span className="project-icon"><ClipboardList size={17} /></span><span><strong>{project.name}</strong><small>{project.lists[0]?.name ?? 'No stages yet'}</small></span></span><span className="project-number">{paperCount(project).toLocaleString()}</span><span className="project-number">{project.lists.length}</span><span className="project-date">{new Date(project.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span><span className="row-arrow"><ArrowRight size={16} /></span></button>)}</div> : <div className="empty-projects"><div className="empty-graphic"><span className="empty-sheet"><FileSpreadsheet size={23} /></span><span className="empty-spark"><Sparkles size={16} /></span></div><span className="section-kicker">A GOOD PLACE TO BEGIN</span><h3>Start with a research question.</h3><p>Create a library, bring in your search results, and shape a screening workflow that stays easy to review.</p><button className="button button-primary" onClick={() => setCreatingProject(true)}><FolderPlus size={16} /> Create your first library</button></div>}
-        <div className="bottom-caption"><span>FIELDNOTE / 01</span><span>MAKE THE EVIDENCE TRACEABLE</span></div>
+        <div className="bottom-caption"><span>SYNTHESYS / 01</span><span>MAKE THE EVIDENCE TRACEABLE</span></div>
       </section> : <section className="review-page page-enter">
         <div className="review-dashboard-header">
           <div className="review-heading">
@@ -1253,7 +1258,7 @@ function App() {
           )}
         </> : <div className="empty-list"><h3>Create a stage to begin screening.</h3></div>}
 
-          <div className="bottom-caption"><span>FIELDNOTE / {String(activeProject.lists.findIndex((list) => list.id === activeListId) + 1).padStart(2, '0')}</span><span>DECISIONS STAY WITH THE PAPER</span></div>
+          <div className="bottom-caption"><span>SYNTHESYS / {String(activeProject.lists.findIndex((list) => list.id === activeListId) + 1).padStart(2, '0')}</span><span>DECISIONS STAY WITH THE PAPER</span></div>
         </div>
       </section>}
     </main>
