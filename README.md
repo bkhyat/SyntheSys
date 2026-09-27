@@ -1,29 +1,124 @@
-# Fieldnote
+# SyntheSys 🔬✨
 
-Fieldnote is a local-first workspace for organizing paper screening in projects and lists. CSV and Excel files are parsed in the browser; projects, lists, papers, scores, and manuscript data are stored in SQLite.
+**SyntheSys** is an AI-assisted, local-first systematic literature review and synthesis platform. It accelerates academic research from initial search screening to deep full-text manuscript extraction and PRISMA-style narrative synthesis.
 
-## Run locally
+---
 
-### Quick Start (Automated Script)
+## 🌟 Key Features
 
-Run the included startup script (auto-configures `.env`, virtual environment, dependencies, and boots backend + frontend):
+### 1. Multi-Stage Systematic Review Workflow
+- **Identification & Screening (Stage 1)**: Import CSV/Excel bibliographies (PubMed, Scopus, Web of Science, arXiv). Run AI-assisted title and abstract screening with confidence scoring (0–10), evidence-based rationales, and threshold sliders.
+- **Full-Text Eligibility (Stage 2)**: Attach full-text PDF manuscripts, verify inclusion/exclusion criteria, and manage candidate papers.
+- **AI Data Extraction (Stage 3)**: Extract custom user-defined research fields (e.g., *Methodology*, *Benchmark Datasets*, *Evaluation Metrics*, *Limitations*) across papers into structured, interactive data tables.
+- **Systematic Synthesis (Stage 4)**: Generate comprehensive, PRISMA/SLR-style narrative syntheses that group papers by methodological paradigms, compare strengths and trade-offs, and outline research gaps. Features a dual **View / Edit** markdown mode, full **LaTeX formula rendering** ($\text{IC}_{50}$, mathematical equations), ASCII hierarchy trees, one-click copy, and persistent revision drafts.
+
+### 2. Deep Manuscript Parsing & Inspection
+- **High-Definition Figures (288 DPI / 4x Scale)**: Automatically extracts plots, chemical structures, and architectural diagrams using tight spatial clustering. Includes an interactive full-resolution lightbox viewer with zoom.
+- **Structured Table Extraction**: Intelligently unpacks multi-line table headers and grid cells into searchable, formatted tables.
+- **Hierarchical Outlines & PDF Navigation**: Hierarchical section outlines with AI-generated section summaries and direct jump-links to exact source PDF pages and lines.
+
+### 3. Local-First & Privacy-Focused
+- **SQLite Database**: Local database (`data/fieldnote.sqlite3`) stores project structures, paper metadata, extracted fields, and PDF BLOBs without cloud storage lock-in.
+- **Flexible AI Providers**: Seamless integration with Google Gemini (`gemini-2.5-flash`) or local/remote Ollama instances.
+
+---
+
+## 🚀 Quick Start
+
+### Automated Setup (Recommended)
+
+Run the included automated bootstrapper to configure virtual environments, sync dependencies, and start both backend and frontend servers:
 
 ```bash
 ./start.sh
 ```
 
-### Manual Setup
+- **Web Application**: [http://localhost:5173](http://localhost:5173)
+- **FastAPI Backend & Swagger Docs**: [http://localhost:3001/docs](http://localhost:3001/docs)
 
-1. Create and activate a Python virtual environment with `python3 -m venv .venv` and `source .venv/bin/activate`.
-2. Install the API dependencies with `python -m pip install -r requirements.txt`.
-3. Install the web dependencies with `npm install`.
-4. Create `.env` from `.env.example` and set `GEMINI_API_KEY` to enable AI screening.
-5. Run `npm run dev` (or `npm start`) and open the URL printed by Vite.
+### CLI Options for `start.sh`
 
-The Gemini key is read only by the local FastAPI server. Screening uses Gemini 2.5 Flash and returns a 0–10 inclusion confidence score with a brief rationale. The score slider starts at 9; papers below the threshold remain in the list and can be shown by lowering it.
+```bash
+./start.sh -b          # Run only the FastAPI backend (port 3001)
+./start.sh -f          # Run only the Vite frontend dev server (port 5173)
+./start.sh -i          # Install / update all Python and Node.js dependencies
+./start.sh -p 8000     # Custom backend port
+```
 
-## Manuscripts
+---
 
-Select one paper to attach or replace its PDF, or open its parsed manuscript. PDFs up to 50 MB and 500 pages are stored as SQLite BLOBs along with their structured extraction JSON. The SQLite database at `data/fieldnote.sqlite3` is created automatically and ignored by Git. Existing projects in the older browser-storage format are migrated once when the database is empty.
+## 🛠 Manual Installation
 
-PDF text is extracted with `pdfplumber`. Parsed pages preserve 1-based page and reading-order line numbers plus text bounding boxes in PDF points, measured from the page's top-left. Numbered sections and subsections expand to show extracted text in-app, with separate links to source PDF locations. Embedded figure images, detected table cells, and references are also shown in-app with source-page links. Image-only scanned PDFs can be attached, but this version does not OCR them; it shows a warning when no selectable text is found. Layout and caption detection are heuristic, so check the source PDF when exact structure matters.
+### 1. Backend Setup (FastAPI & Python)
+```bash
+# Create and activate Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Frontend Setup (React & Vite)
+```bash
+# Install Node dependencies
+npm install
+```
+
+### 3. Environment Configuration
+Create a `.env` file from the provided template:
+```bash
+cp .env.example .env
+```
+
+Configure your environment settings in `.env`:
+```env
+# Google Gemini API key
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# (Optional) Ollama Configuration for local LLM screening
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=gemma:12b
+
+# LLM Provider Preference: auto | gemini | ollama | mock
+LLM_PROVIDER=auto
+```
+
+### 4. Running the Development Servers
+```bash
+# Terminal 1: Backend
+source .venv/bin/activate
+python -m uvicorn backend.main:app --reload --port 3001
+
+# Terminal 2: Frontend
+npm run dev
+```
+
+---
+
+## 🏗 Tech Stack
+
+- **Frontend**: React 18, TypeScript, Vite, KaTeX (LaTeX math rendering), Lucide Icons, Vanilla CSS Design System
+- **Backend**: FastAPI, Python 3.10+, Uvicorn, SQLite3, HTTPX
+- **Document & PDF Processing**: `pdfplumber`, `pypdf`, `Pillow`
+- **AI / LLM Integration**: Google Gemini 2.5 Flash API (`google-genai` / REST), Ollama
+
+---
+
+## 🧪 Testing
+
+Run backend tests:
+```bash
+.venv/bin/python -m unittest discover -s tests
+```
+
+Run frontend build verification:
+```bash
+npm run build
+```
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
