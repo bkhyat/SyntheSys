@@ -23,9 +23,36 @@ type LineReference = { page_number: number; line_number: number }
 type BoundingBox = { x0: number; top: number; x1: number; bottom: number }
 type DocumentLine = { page_number: number; line_number: number; text: string; bbox: BoundingBox; font_size: number }
 type Section = {
-  title: string; level: number; start_page: number; end_page: number
-  start_line: number; line_refs: LineReference[]; children: Section[]
+  title: string
+  original_title?: string
+  standard_section?: string | null
+  is_excluded_from_llm?: boolean
+  level: number
+  start_page: number
+  end_page: number
+  start_line: number
+  line_refs: LineReference[]
+  children: Section[]
   summary?: string
+}
+type MappedSectionItem = {
+  standard_section: string
+  original_title: string
+  page: number
+  line: number
+  level: number
+}
+type UnmatchedSectionItem = {
+  original_title: string
+  page: number
+  line: number
+  level: number
+}
+type ReferencesSectionItem = {
+  original_title: string
+  page: number
+  line: number
+  line_count: number
 }
 type Figure = { label: string; caption: string; page_number: number; line_refs: LineReference[]; image_bbox?: BoundingBox }
 type Table = {
@@ -36,7 +63,11 @@ type Reference = { label: string; text: string; page_number: number; line_refs: 
 type ManuscriptDocument = {
   file_name: string; page_count: number; line_count: number; extracted_at: string
   overall_summary?: string
-  sections: Section[]; pages: { page_number: number; width: number; height: number; lines: DocumentLine[] }[]
+  sections: Section[]
+  mapped_sections?: MappedSectionItem[]
+  unmatched_sections?: UnmatchedSectionItem[]
+  references_section?: ReferencesSectionItem | null
+  pages: { page_number: number; width: number; height: number; lines: DocumentLine[] }[]
   figures: Figure[]; tables: Table[]; references: Reference[]; warnings: string[]
 }
 
@@ -321,7 +352,20 @@ function SectionCard({
           <span className="section-level-badge">
             {level === 1 ? 'Section' : 'Subsection'} {String(section.level)}
           </span>
-          <h3 className="section-card-title">{section.title}</h3>
+          {section.standard_section && (
+            <span
+              className={`standard-section-badge std-badge-${section.standard_section.toLowerCase().replace(/[\s&]+/g, '')}`}
+              title={`Mapped standard section: ${section.standard_section}`}
+            >
+              {section.standard_section}
+            </span>
+          )}
+          {section.is_excluded_from_llm && section.standard_section !== 'References' && (
+            <span className="excluded-section-badge" title="Administrative section excluded from LLM API prompts">
+              Administrative (Excluded)
+            </span>
+          )}
+          <h3 className="section-card-title">{section.original_title || section.title}</h3>
         </div>
 
         <div className="section-header-right">
@@ -402,6 +446,8 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [rawLineMode, setRawLineMode] = useState(false)
+  const [generatingSummaries, setGeneratingSummaries] = useState(false)
+  const [summaryError, setSummaryError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -420,6 +466,26 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [paper.id])
+
+  const handleGenerateSummaries = async () => {
+    setGeneratingSummaries(true)
+    setSummaryError('')
+    try {
+      const response = await fetch(`/api/papers/${encodeURIComponent(paper.id)}/summarize`, {
+        method: 'POST',
+      })
+      const payload = await response.json() as ManuscriptDocument & { detail?: string }
+      if (!response.ok) {
+        throw new Error(payload.detail || 'Could not generate summaries.')
+      }
+      setDocument(payload)
+      setShowSummaries(true)
+    } catch (err: unknown) {
+      setSummaryError(err instanceof Error ? err.message : 'Could not generate AI summaries.')
+    } finally {
+      setGeneratingSummaries(false)
+    }
+  }
 
   const linesByReference = useMemo(() => {
     if (!document) return new Map<string, DocumentLine>()
@@ -529,6 +595,67 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
               {/* SECTION BY SECTION FULL TEXT VIEW */}
               {tab === 'sections' && (
                 <section className="document-section sections-view-container">
+                  {/* Standard Section Mappings & Unmatched Bar */}
+                  {((document.mapped_sections && document.mapped_sections.length > 0) || (document.unmatched_sections && document.unmatched_sections.length > 0)) && (
+                    <div className="section-mapping-overview-card">
+                      <div className="mapping-overview-header">
+                        <div className="mapping-overview-title">
+                          <BookOpen size={12} />
+                          <span>CANONICAL SECTION MAPPINGS</span>
+                          <span className="mapping-count-badge">{document.mapped_sections?.length || 0} mapped</span>
+                        </div>
+                        {document.references_section && (
+                          <button
+                            type="button"
+                            className="references-mapped-indicator"
+                            onClick={() => jumpToSection(document.references_section!.page, document.references_section!.line)}
+                            title="Jump to References Section in PDF"
+                          >
+                            <FileText size={11} />
+                            <span>References mapped ({document.references.length} citations)</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {document.mapped_sections && document.mapped_sections.length > 0 && (
+                        <div className="mapped-sections-grid">
+                          {document.mapped_sections.map((m, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              className={`mapped-section-pill std-badge-${m.standard_section.toLowerCase().replace(/[\s&]+/g, '')}`}
+                              onClick={() => jumpToSection(m.page, m.line)}
+                              title={`Jump to ${m.original_title} (Page ${m.page})`}
+                            >
+                              <span className="mapped-std-name">{m.standard_section}</span>
+                              <span className="mapped-orig-arrow">→</span>
+                              <span className="mapped-orig-name">{m.original_title}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {document.unmatched_sections && document.unmatched_sections.length > 0 && (
+                        <div className="unmatched-sections-row">
+                          <span className="unmatched-label">Unmatched Sections ({document.unmatched_sections.length}):</span>
+                          <div className="unmatched-pills-list">
+                            {document.unmatched_sections.map((u, uIdx) => (
+                              <button
+                                key={uIdx}
+                                type="button"
+                                className="unmatched-section-pill"
+                                onClick={() => jumpToSection(u.page, u.line)}
+                                title={`Jump to ${u.original_title} (Page ${u.page})`}
+                              >
+                                {u.original_title}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {document.overall_summary && (
                     <div className="manuscript-overall-summary">
                       <div className="overall-summary-badge">
@@ -560,12 +687,27 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
                     <div className="sections-toolbar-actions">
                       <button
                         type="button"
-                        className={`toolbar-toggle-btn ${showSummaries ? 'active' : ''}`}
-                        onClick={() => setShowSummaries(!showSummaries)}
-                        title="Toggle AI Section Summaries"
+                        className={`toolbar-btn generate-summaries-action-btn ${document.overall_summary ? 'regenerate-btn' : 'primary-generate-btn'}`}
+                        onClick={handleGenerateSummaries}
+                        disabled={generatingSummaries}
+                        title={document.overall_summary ? 'Regenerate AI section summaries' : 'Generate AI summaries for manuscript and sections'}
                       >
-                        <Sparkles size={12} /> Summaries
+                        {generatingSummaries ? (
+                          <><LoaderCircle size={12} className="spin" /> Generating…</>
+                        ) : (
+                          <><Sparkles size={12} /> {document.overall_summary ? 'Regenerate Summaries' : 'Generate AI Summaries'}</>
+                        )}
                       </button>
+                      {document.overall_summary && (
+                        <button
+                          type="button"
+                          className={`toolbar-toggle-btn ${showSummaries ? 'active' : ''}`}
+                          onClick={() => setShowSummaries(!showSummaries)}
+                          title="Toggle AI Section Summaries"
+                        >
+                          <Sparkles size={12} /> Summaries
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="toolbar-btn"
@@ -585,6 +727,13 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
                     </div>
                   </div>
 
+                  {summaryError && (
+                    <div className="manuscript-message manuscript-error inline-summary-error">
+                      <span>{summaryError}</span>
+                      <button type="button" className="search-clear-btn" onClick={() => setSummaryError('')}><X size={12} /></button>
+                    </div>
+                  )}
+
                   {/* Quick Jump Index Pills */}
                   {document.sections.length > 0 && !searchQuery && (
                     <div className="section-jump-bar" aria-label="Quick section navigation">
@@ -597,7 +746,7 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
                             className="jump-pill"
                             onClick={() => jumpToSection(sec.start_page, sec.start_line)}
                           >
-                            {sec.title}
+                            {sec.original_title || sec.title}
                           </button>
                         ))}
                       </div>

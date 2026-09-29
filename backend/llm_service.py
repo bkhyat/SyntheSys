@@ -14,6 +14,13 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from backend.section_matcher import (
+    annotate_section_tree,
+    build_substantive_manuscript_text,
+    clean_section_heading,
+    match_standard_section,
+)
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
@@ -153,6 +160,10 @@ def is_valid_summarizable_section(
     norm_title = normalize_section_title(title)
     if not norm_title:
         norm_title = title.strip()
+
+    std_sec, is_excluded = match_standard_section(norm_title)
+    if is_excluded:
+        return False
 
     for pattern in _NON_SUMMARIZABLE_PATTERNS:
         if pattern.search(norm_title):
@@ -725,28 +736,12 @@ async def extract_paper_data_with_llm(
 ) -> dict[str, str]:
     """
     Extract specific target fields from a parsed manuscript document.
+    Excludes non-substantive sections (References, Funding, Acknowledgments, etc.) from LLM input.
     Returns a dictionary mapping field name to extracted text value.
     """
-    lines: list[str] = []
-    for page in manuscript.get("pages", []):
-        for line in page.get("lines", []):
-            text = line.get("text", "").strip()
-            if text:
-                lines.append(text)
-
-    if not lines:
+    sample_text = build_substantive_manuscript_text(manuscript, max_chars=24000)
+    if not sample_text:
         return {f.name: "Not reported" for f in fields}
-
-    # Slice text on complete line boundaries up to 24,000 characters for sub-3s LLM latency
-    accumulated: list[str] = []
-    current_len = 0
-    for line_str in lines:
-        if current_len + len(line_str) + 1 > 24000:
-            break
-        accumulated.append(line_str)
-        current_len += len(line_str) + 1
-
-    sample_text = "\n".join(accumulated) if accumulated else "\n".join(lines[:100])
 
     prompt = (
         "You are an expert scientific researcher and data extraction specialist. "
@@ -768,14 +763,15 @@ async def extract_paper_data_with_llm(
 
     provider_pref = os.getenv("LLM_PROVIDER", "auto").lower()
     if provider_pref == "mock":
+        sample_lines = sample_text.split("\n")
         extracted: dict[str, str] = {}
         for f in fields:
             field_word = f.name.lower()
-            matching = [l for l in lines if field_word in l.lower()]
+            matching = [l for l in sample_lines if field_word in l.lower()]
             if matching:
                 extracted[f.name] = matching[0][:200]
             else:
-                extracted[f.name] = lines[0][:200] if lines else "Reported in manuscript"
+                extracted[f.name] = sample_lines[0][:200] if sample_lines else "Reported in manuscript"
         return extracted
 
     api_key = os.getenv("GEMINI_API_KEY", "").strip()

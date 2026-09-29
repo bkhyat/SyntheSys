@@ -53,11 +53,18 @@ class ManuscriptApiTests(unittest.TestCase):
 
         document_response = client.get("/api/papers/paper-1/manuscript")
         self.assertEqual(document_response.status_code, 200)
-        self.assertIn("overall_summary", document_response.json())
-        self.assertIn("summary", document_response.json()["sections"][0])
-        self.assertEqual(document_response.json()["figures"][0]["label"], "Figure 1")
-        self.assertIn("bbox", document_response.json()["pages"][0]["lines"][0])
-        document = document_response.json()
+        doc_json = document_response.json()
+        self.assertIn("mapped_sections", doc_json)
+        self.assertEqual(doc_json["figures"][0]["label"], "Figure 1")
+        self.assertIn("bbox", doc_json["pages"][0]["lines"][0])
+
+        # Test on-demand summarization endpoint
+        summarize_response = client.post("/api/papers/paper-1/summarize")
+        self.assertEqual(summarize_response.status_code, 200)
+        self.assertIn("overall_summary", summarize_response.json())
+        self.assertIn("summary", summarize_response.json()["sections"][0])
+
+        document = summarize_response.json()
         document["figures"][0]["image_bbox"] = {"x0": 72, "top": 520, "x1": 310, "bottom": 570}
         preview_bytes = b"\x89PNG\r\n\x1a\nfixture"
         database.save_manuscript(document, pdf_bytes, [(0, preview_bytes)])

@@ -5,6 +5,8 @@ from typing import Any
 
 import pdfplumber
 
+from backend.section_matcher import annotate_section_tree, extract_section_mappings_summary
+
 _CAPTION_PATTERN = re.compile(r"^(?P<kind>figure|fig\.?|table)\s*(?P<label>\d+(?:\.\d+)*|[A-Z])(?:(?P<separator>[.:\-–])\s*(?P<caption>.*)|\s*)$", re.IGNORECASE)
 _NUMBERED_HEADING = re.compile(r"^(?P<number>\d{1,2}(?:\.\d{1,2})*|I{1,3}|IV|V|VI{0,3}|IX|X)\.\s+\S", re.IGNORECASE)
 _REFERENCE_NUMBER = re.compile(r"^\s*(?:\[(?P<bracket>\d+)\]|(?P<plain>\d+)[.)])\s+(?P<text>.+)$")
@@ -783,6 +785,8 @@ def extract_manuscript(pdf_bytes: bytes, paper_id: str, file_name: str) -> dict[
     all_sizes = [line["font_size"] for line in all_lines if line["font_size"] > 0]
     body_size = statistics.median(all_sizes) if all_sizes else 0.0
     outline = _build_outline(all_lines, body_size)
+    annotate_section_tree(outline)
+    mapping_summary = extract_section_mappings_summary({"sections": outline})
 
     references: list[dict[str, Any]] = []
     in_references = False
@@ -823,6 +827,9 @@ def extract_manuscript(pdf_bytes: bytes, paper_id: str, file_name: str) -> dict[
         "page_count": len(pages),
         "line_count": len(all_lines),
         "sections": outline,
+        "mapped_sections": mapping_summary["mapped_sections"],
+        "unmatched_sections": mapping_summary["unmatched_sections"],
+        "references_section": mapping_summary["references_section"],
         "pages": pages,
         "figures": figures,
         "tables": tables,

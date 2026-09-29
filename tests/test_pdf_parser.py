@@ -63,6 +63,10 @@ class ManuscriptParserTests(unittest.TestCase):
         self.assertEqual(result["tables"][0]["caption"], "Study characteristics")
         self.assertEqual(result["tables"][0]["cells"], [["Group", "N"], ["Control", "24"]])
         self.assertEqual(result["references"][0]["label"], "1")
+        self.assertIn("mapped_sections", result)
+        self.assertTrue(any(m["standard_section"] == "Introduction" for m in result["mapped_sections"]))
+        self.assertIsNotNone(result.get("references_section"))
+
         left_index = next(index for index, line in enumerate(result["pages"][0]["lines"]) if line["text"].startswith("Left column"))
         right_index = next(index for index, line in enumerate(result["pages"][0]["lines"]) if line["text"].startswith("Right column"))
         self.assertEqual(result["pages"][0]["lines"][left_index]["text"], "Left column content starts here.")
@@ -72,6 +76,29 @@ class ManuscriptParserTests(unittest.TestCase):
         cited_line = result["pages"][citation["page_number"] - 1]["lines"][citation["line_number"] - 1]
         self.assertEqual(cited_line["text"], "[1] Smith A. Example study. 2024.")
         self.assertIn("x0", cited_line["bbox"])
+
+    def test_section_matcher_and_exclusions(self):
+        from backend.section_matcher import match_standard_section, clean_section_heading
+
+        # Standard scientific sections
+        self.assertEqual(match_standard_section("1. Introduction")[0], "Introduction")
+        self.assertEqual(match_standard_section("2. Materials & Methods")[0], "Methods")
+        self.assertEqual(match_standard_section("2.1 Proposed Architecture")[0], "Methods")
+        self.assertEqual(match_standard_section("3. Experimental Results & Evaluation")[0], "Results")
+        self.assertEqual(match_standard_section("4. Discussion")[0], "Discussion")
+        self.assertEqual(match_standard_section("5. Conclusions")[0], "Conclusion")
+        self.assertEqual(match_standard_section("5.1 Study Limitations & Threats to Validity")[0], "Limitations")
+        self.assertEqual(match_standard_section("5.2 Future Directions & Open Work")[0], "Future Directions")
+        self.assertEqual(match_standard_section("VI. REFERENCES")[0], "References")
+
+        # Excluded administrative sections
+        self.assertTrue(match_standard_section("Acknowledgments")[1])
+        self.assertTrue(match_standard_section("Author Contributions")[1])
+        self.assertTrue(match_standard_section("Funding & Financial Support")[1])
+        self.assertTrue(match_standard_section("Conflict of Interest Statement")[1])
+        self.assertTrue(match_standard_section("Data Availability Statement")[1])
+        self.assertTrue(match_standard_section("Supplementary Materials")[1])
+        self.assertTrue(match_standard_section("Appendix A: Proofs")[1])
 
     def test_unpack_multiline_table(self):
         from backend.pdf_parser import _unpack_multiline_table

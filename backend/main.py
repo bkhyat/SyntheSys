@@ -159,10 +159,6 @@ async def upload_manuscript(paper_id: str, file: UploadFile = File(...)) -> JSON
 
     extracted_at = datetime.now(timezone.utc).isoformat()
     document["extracted_at"] = extracted_at
-    try:
-        document = await generate_manuscript_summaries(document)
-    except Exception as error:
-        logger.warning("Could not generate summaries for paper %s: %s", paper_id, error)
 
     try:
         figure_previews = await run_in_threadpool(_render_figure_previews, document, pdf_bytes)
@@ -209,7 +205,7 @@ async def _get_current_manuscript(paper_id: str) -> dict[str, Any]:
             migration_lock = _manuscript_migration_locks.setdefault(paper_id, asyncio.Lock())
         async with migration_lock:
             document = await run_in_threadpool(database.get_manuscript, paper_id) or document
-            if document.get("schema_version", 0) < 3 or "overall_summary" not in document:
+            if document.get("schema_version", 0) < 3 or "mapped_sections" not in document:
                 pdf_bytes = await run_in_threadpool(database.get_manuscript_pdf, paper_id)
                 if pdf_bytes is None:
                     pdf_path = MANUSCRIPT_ROOT / paper_id / "manuscript.pdf"
@@ -224,10 +220,8 @@ async def _get_current_manuscript(paper_id: str) -> dict[str, Any]:
                         return document
 
                     upgraded_document["extracted_at"] = datetime.now(timezone.utc).isoformat()
-                    try:
-                        upgraded_document = await generate_manuscript_summaries(upgraded_document)
-                    except Exception:
-                        logger.exception("Could not generate summaries during upgrade for paper %s", paper_id)
+                    if "overall_summary" in document:
+                        upgraded_document["overall_summary"] = document["overall_summary"]
 
                     old_figure_keys = [(figure.get("label"), figure.get("page_number")) for figure in document.get("figures", [])]
                     new_figure_keys = [(figure.get("label"), figure.get("page_number")) for figure in upgraded_document["figures"]]
