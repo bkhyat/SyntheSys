@@ -90,6 +90,10 @@ def initialize_database() -> None:
             connection.execute("ALTER TABLE list_papers ADD COLUMN manual_visibility TEXT")
         if "extracted_data" not in list_paper_columns:
             connection.execute("ALTER TABLE list_papers ADD COLUMN extracted_data TEXT")
+        if "decision" not in list_paper_columns:
+            connection.execute("ALTER TABLE list_papers ADD COLUMN decision TEXT")
+        if "explanation" not in list_paper_columns:
+            connection.execute("ALTER TABLE list_papers ADD COLUMN explanation TEXT")
 
         paper_list_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(paper_lists)")
@@ -133,7 +137,7 @@ def get_projects() -> list[dict[str, Any]]:
             for list_position, paper_list in enumerate(lists):
                 entries = connection.execute(
                     """
-                    SELECT papers.*, list_papers.score, list_papers.rationale, list_papers.manual_visibility, list_papers.extracted_data,
+                    SELECT papers.*, list_papers.score, list_papers.rationale, list_papers.decision, list_papers.explanation, list_papers.manual_visibility, list_papers.extracted_data,
                            manuscripts.file_name, manuscripts.page_count,
                            manuscripts.line_count, manuscripts.extracted_at,
                            manuscripts.warnings_json
@@ -147,6 +151,13 @@ def get_projects() -> list[dict[str, Any]]:
                 ).fetchall()
                 papers = []
                 for paper in entries:
+                    paper_dict = dict(paper)
+                    dec = paper_dict.get("decision")
+                    expl = paper_dict.get("explanation") or paper_dict.get("rationale")
+                    if dec is None and paper_dict.get("score") is not None:
+                        s = paper_dict["score"]
+                        dec = "Yes" if s >= 8 else "Not Sure" if s >= 5 else "No"
+                    
                     if list_position == 0:
                         # Primary/master list (Stage 1 by default): full record
                         record = {
@@ -159,10 +170,14 @@ def get_projects() -> list[dict[str, Any]]:
                             "url": paper["url"],
                             "abstract": paper["abstract"],
                         }
+                        if dec is not None:
+                            record["include"] = dec
+                            record["decision"] = dec
+                        if expl is not None:
+                            record["explanation"] = expl
+                            record["rationale"] = expl
                         if paper["score"] is not None:
                             record["score"] = paper["score"]
-                        if paper["rationale"] is not None:
-                            record["rationale"] = paper["rationale"]
                         if paper["manual_visibility"] is not None:
                             record["manualVisibility"] = paper["manual_visibility"]
                         if paper["extracted_data"]:
@@ -179,10 +194,14 @@ def get_projects() -> list[dict[str, Any]]:
                         record = {
                             "id": paper["id"],
                         }
+                        if dec is not None:
+                            record["include"] = dec
+                            record["decision"] = dec
+                        if expl is not None:
+                            record["explanation"] = expl
+                            record["rationale"] = expl
                         if paper["score"] is not None:
                             record["score"] = paper["score"]
-                        if paper["rationale"] is not None:
-                            record["rationale"] = paper["rationale"]
                         if paper["manual_visibility"] is not None:
                             record["manualVisibility"] = paper["manual_visibility"]
                         if paper["extracted_data"]:
@@ -276,9 +295,14 @@ def replace_projects(projects: list[dict[str, Any]]) -> None:
                             ),
                         )
                     extracted_data_json = json.dumps(paper.get("extractedData")) if paper.get("extractedData") is not None else None
+                    dec_val = paper.get("include") or paper.get("decision")
+                    expl_val = paper.get("explanation") or paper.get("rationale")
+                    score_val = paper.get("score")
+                    if score_val is None and dec_val is not None:
+                        score_val = 10 if dec_val == "Yes" else 0 if dec_val == "No" else 5
                     connection.execute(
-                        "INSERT INTO list_papers (list_id, paper_id, position, score, rationale, manual_visibility, extracted_data) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (paper_list["id"], paper["id"], paper_position, paper.get("score"), paper.get("rationale"), paper.get("manualVisibility"), extracted_data_json),
+                        "INSERT INTO list_papers (list_id, paper_id, position, score, rationale, decision, explanation, manual_visibility, extracted_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (paper_list["id"], paper["id"], paper_position, score_val, expl_val, dec_val, expl_val, paper.get("manualVisibility"), extracted_data_json),
                     )
                     manuscript = paper.get("manuscript")
                     if manuscript:

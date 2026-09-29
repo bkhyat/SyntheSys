@@ -7,9 +7,11 @@ import ManuscriptPanel from './ManuscriptPanel'
 import SynthesisStudio from './SynthesisStudio'
 import type { ManuscriptMetadata } from './types'
 
-type ManualVisibility = 'show' | 'hide'
-type VisibilityFilter = 'included' | 'hidden' | 'all'
+export type ManualVisibility = 'show' | 'hide'
+export type VisibilityFilter = 'included' | 'hidden' | 'all'
 export type StageType = 'standard' | 'screening' | 'extraction' | 'synthesis'
+export type ScreeningDecision = 'Yes' | 'No' | 'Not Sure'
+export type DecisionFilter = 'all' | 'Yes' | 'Not Sure' | 'No' | 'unscreened'
 
 export type ExtractionField = {
   id: string
@@ -21,13 +23,17 @@ export type ExtractedFieldValue = string | { value?: string }
 
 export type Paper = {
   id: string; title: string; authors: string; year: string; journal: string
-  doi: string; url: string; abstract: string; score?: number; rationale?: string
+  doi: string; url: string; abstract: string
+  include?: ScreeningDecision; decision?: ScreeningDecision; explanation?: string
+  score?: number; rationale?: string
   manualVisibility?: ManualVisibility
   extractedData?: Record<string, string>
   manuscript?: ManuscriptMetadata
 }
 export type PaperRef = {
-  id: string; score?: number; rationale?: string
+  id: string
+  include?: ScreeningDecision; decision?: ScreeningDecision; explanation?: string
+  score?: number; rationale?: string
   manualVisibility?: ManualVisibility
   extractedData?: Record<string, string>
 }
@@ -40,11 +46,11 @@ export type PaperList = {
   extractionFields?: ExtractionField[]
   synthesisText?: string
   synthesisPrompt?: string
-  minScore: number
+  minScore?: number
   papers: (Paper | PaperRef)[]
 }
 type Project = { id: string; name: string; createdAt: string; lists: PaperList[] }
-type ScreeningResult = { id: string; score: number; rationale: string }
+type ScreeningResult = { id: string; include: ScreeningDecision; explanation: string; decision?: ScreeningDecision; score?: number; rationale?: string }
 const LEGACY_STORAGE_KEY = 'fieldnote.projects.v1'
 const BATCH_SIZE = 15
 
@@ -68,10 +74,17 @@ function createList(name = 'Stage 1', stageType: StageType = 'standard', options
   }
 }
 
-function isPaperIncluded(paper: Paper, minScore: number): boolean {
+function isPaperIncluded(paper: Paper): boolean {
   if (paper.manualVisibility === 'hide') return false
   if (paper.manualVisibility === 'show') return true
-  return paper.score === undefined || paper.score >= minScore
+  const dec = paper.include ?? paper.decision
+  if (dec) {
+    return dec === 'Yes' || dec === 'Not Sure'
+  }
+  if (paper.score !== undefined) {
+    return paper.score >= 5
+  }
+  return true
 }
 
 function readLegacyProjects(): Project[] {
@@ -151,7 +164,6 @@ function App() {
   const [stageDraftExclusion, setStageDraftExclusion] = useState('')
   const [stageDraftFields, setStageDraftFields] = useState<ExtractionField[]>(DEFAULT_EXTRACTION_FIELDS)
   const [stageDraftSynthesisPrompt, setStageDraftSynthesisPrompt] = useState('')
-  const [stageDraftMinScore, setStageDraftMinScore] = useState(9)
 
   const [creatingProject, setCreatingProject] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
@@ -223,7 +235,14 @@ function App() {
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  useEffect(() => { setSelectedIds(new Set()); setSearch(''); setVisibilityFilter('included') }, [activeListId])
+  const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>('all')
+
+  useEffect(() => {
+    setSelectedIds(new Set())
+    setSearch('')
+    setVisibilityFilter('included')
+    setDecisionFilter('all')
+  }, [activeListId])
 
   // Master paper lookup map from Stage 1 (the default stage for the library)
   const masterPapersMap = useMemo(() => {
@@ -248,8 +267,11 @@ function App() {
       if (master) {
         return {
           ...master,
-          score: entry.score,
-          rationale: entry.rationale,
+          include: entry.include ?? entry.decision ?? master.include ?? master.decision,
+          decision: entry.include ?? entry.decision ?? master.include ?? master.decision,
+          explanation: entry.explanation ?? entry.rationale ?? master.explanation ?? master.rationale,
+          score: entry.score ?? master.score,
+          rationale: entry.rationale ?? master.rationale,
           manualVisibility: entry.manualVisibility,
           extractedData: entry.extractedData ?? master.extractedData,
         }
@@ -262,23 +284,32 @@ function App() {
     if (!activeList) return []
     const query = search.trim().toLowerCase()
     return resolvedActiveListPapers.filter((paper) => {
-      const matchesSearch = !query || [paper.title, paper.authors, paper.journal, paper.doi].some((value) => value && value.toLowerCase().includes(query))
+      const matchesSearch = !query || [paper.title, paper.authors, paper.journal, paper.doi, paper.explanation, paper.rationale].some((value) => value && value.toLowerCase().includes(query))
       if (!matchesSearch) return false
-      const included = isPaperIncluded(paper, activeList.minScore)
-      if (visibilityFilter === 'included') return included
-      if (visibilityFilter === 'hidden') return !included
+      const included = isPaperIncluded(paper)
+      if (visibilityFilter === 'included' && !included) return false
+      if (visibilityFilter === 'hidden' && included) return false
+
+      if (decisionFilter !== 'all') {
+        const dec = paper.include ?? paper.decision
+        if (decisionFilter === 'unscreened') {
+          if (dec !== undefined) return false
+        } else {
+          if (dec !== decisionFilter) return false
+        }
+      }
       return true
     })
-  }, [activeList, resolvedActiveListPapers, search, visibilityFilter])
+  }, [activeList, resolvedActiveListPapers, search, visibilityFilter, decisionFilter])
 
   const includedCount = useMemo(() => {
     if (!activeList) return 0
-    return resolvedActiveListPapers.filter((paper) => isPaperIncluded(paper, activeList.minScore)).length
+    return resolvedActiveListPapers.filter((paper) => isPaperIncluded(paper)).length
   }, [activeList, resolvedActiveListPapers])
 
   const hiddenCount = useMemo(() => {
     if (!activeList) return 0
-    return resolvedActiveListPapers.filter((paper) => !isPaperIncluded(paper, activeList.minScore)).length
+    return resolvedActiveListPapers.filter((paper) => !isPaperIncluded(paper)).length
   }, [activeList, resolvedActiveListPapers])
 
   const selectedPapers = useMemo(() => {
@@ -290,8 +321,21 @@ function App() {
   }, [selectedPapers])
 
   const allVisibleSelected = visiblePapers.length > 0 && visiblePapers.every((paper) => selectedIds.has(paper.id))
+
+  const yesCount = useMemo(() => {
+    return resolvedActiveListPapers.filter((p) => (p.include ?? p.decision) === 'Yes').length
+  }, [resolvedActiveListPapers])
+
+  const notSureCount = useMemo(() => {
+    return resolvedActiveListPapers.filter((p) => (p.include ?? p.decision) === 'Not Sure').length
+  }, [resolvedActiveListPapers])
+
+  const noCount = useMemo(() => {
+    return resolvedActiveListPapers.filter((p) => (p.include ?? p.decision) === 'No').length
+  }, [resolvedActiveListPapers])
+
   const screenedCount = useMemo(() => {
-    return resolvedActiveListPapers.filter((paper) => paper.score !== undefined).length
+    return resolvedActiveListPapers.filter((paper) => (paper.include ?? paper.decision) !== undefined || paper.score !== undefined).length
   }, [resolvedActiveListPapers])
 
   // Destination Stage in copy dialog
@@ -323,7 +367,7 @@ function App() {
     const currentPaper = resolvedActiveListPapers.find((p) => p.id === paperId)
     if (!currentPaper) return
 
-    const currentlyIncluded = isPaperIncluded(currentPaper, activeList.minScore)
+    const currentlyIncluded = isPaperIncluded(currentPaper)
     const nextVisibility: ManualVisibility = currentlyIncluded ? 'hide' : 'show'
 
     updateProject(activeProject.id, (project) => ({
@@ -411,7 +455,6 @@ function App() {
     setStageDraftExclusion('')
     setStageDraftFields(DEFAULT_EXTRACTION_FIELDS)
     setStageDraftSynthesisPrompt('')
-    setStageDraftMinScore(9)
     setError('')
     setStageModalOpen(true)
   }
@@ -426,7 +469,6 @@ function App() {
     setStageDraftExclusion(list.exclusionCriteria ?? '')
     setStageDraftFields(list.extractionFields && list.extractionFields.length > 0 ? list.extractionFields : DEFAULT_EXTRACTION_FIELDS)
     setStageDraftSynthesisPrompt(list.synthesisPrompt ?? '')
-    setStageDraftMinScore(list.minScore ?? 9)
     setError('')
     setStageModalOpen(true)
   }
@@ -447,7 +489,6 @@ function App() {
         exclusionCriteria: stageDraftExclusion.trim(),
         extractionFields: stageDraftType === 'extraction' ? cleanFields : [],
         synthesisPrompt: stageDraftSynthesisPrompt.trim(),
-        minScore: stageDraftMinScore,
       })
       updateProject(activeProject.id, (project) => ({
         ...project,
@@ -469,7 +510,6 @@ function App() {
               exclusionCriteria: stageDraftExclusion.trim(),
               extractionFields: stageDraftType === 'extraction' ? cleanFields : list.extractionFields,
               synthesisPrompt: stageDraftSynthesisPrompt.trim(),
-              minScore: stageDraftMinScore,
             }
           }
           return list
@@ -656,7 +696,17 @@ function App() {
         const byId = new Map(results.map((result) => [result.id, result]))
         evaluatedPapers = selectedPapers.map((paper) => {
           const result = byId.get(paper.id)
-          return result ? { ...paper, score: result.score, rationale: result.rationale } : paper
+          if (!result) return paper
+          const dec = result.include ?? result.decision ?? (result.score !== undefined ? (result.score >= 8 ? 'Yes' : result.score >= 5 ? 'Not Sure' : 'No') : 'Not Sure')
+          const expl = result.explanation || result.rationale || ''
+          return {
+            ...paper,
+            include: dec,
+            decision: dec,
+            explanation: expl,
+            rationale: expl,
+            score: dec === 'Yes' ? 10 : dec === 'No' ? 0 : 5,
+          }
         })
       } catch (screenError) {
         setError(screenError instanceof Error ? screenError.message : 'Screening failed. Try again.')
@@ -736,6 +786,9 @@ function App() {
               doi: p.doi || '',
               url: p.url || '',
               abstract: p.abstract || '',
+              include: p.include || p.decision,
+              decision: p.include || p.decision,
+              explanation: p.explanation || p.rationale,
               score: p.score,
               rationale: p.rationale,
               extractedData: p.extractedData || {},
@@ -763,8 +816,15 @@ function App() {
     // Additional stages store reference and stage-specific score/rationale/manualVisibility/extractedData
     const newRefs: PaperRef[] = evaluatedPapers.map((paper) => {
       const ref: PaperRef = { id: paper.id }
+      if (paper.include || paper.decision) {
+        ref.include = paper.include || paper.decision
+        ref.decision = paper.include || paper.decision
+      }
+      if (paper.explanation || paper.rationale) {
+        ref.explanation = paper.explanation || paper.rationale
+        ref.rationale = paper.explanation || paper.rationale
+      }
       if (paper.score !== undefined) ref.score = paper.score
-      if (paper.rationale) ref.rationale = paper.rationale
       if (paper.manualVisibility) ref.manualVisibility = paper.manualVisibility
       if (paper.extractedData) ref.extractedData = paper.extractedData
       return ref
@@ -779,7 +839,6 @@ function App() {
       extractionFields: shouldExtract ? validExtractionFields : (createTarget ? (effectiveStageType === 'extraction' ? validExtractionFields : []) : (selectedTargetList?.extractionFields ?? [])),
       synthesisText: shouldSynthesize ? generatedSynthesisText : (selectedTargetList?.synthesisText ?? ''),
       synthesisPrompt: shouldSynthesize ? copySynthesisPrompt.trim() : (createTarget ? copySynthesisPrompt.trim() : (selectedTargetList?.synthesisPrompt ?? '')),
-      minScore: createTarget ? 9 : (selectedTargetList?.minScore ?? 9),
       papers: [],
     }
 
@@ -824,8 +883,6 @@ function App() {
     })
   }
 
-  const averageScore = screenedCount && activeList ? (resolvedActiveListPapers.reduce((sum, paper) => sum + (paper.score ?? 0), 0) / screenedCount).toFixed(1) : '—'
-
   // Extraction columns for active stage
   const activeExtractionFields = useMemo(() => {
     return (activeList?.extractionFields && activeList.extractionFields.length > 0) ? activeList.extractionFields : []
@@ -842,7 +899,7 @@ function App() {
     const cleanProjectName = activeProject.name.replace(/[^a-zA-Z0-9_-]/g, '_') || 'Library'
     const fileName = `${cleanProjectName}_${cleanStageName}`
 
-    const hasScore = activeList.stageType === 'screening' || visiblePapers.some((p) => p.score !== undefined)
+    const hasScreening = activeList.stageType === 'screening' || visiblePapers.some((p) => (p.include || p.decision) !== undefined || p.score !== undefined)
     const extractionCols = activeExtractionFields
 
     if (format === 'csv') {
@@ -857,9 +914,9 @@ function App() {
           'Abstract': paper.abstract || '',
         }
 
-        if (hasScore) {
-          row['Inclusion Score'] = paper.score !== undefined ? paper.score : ''
-          row['AI Screening Rationale'] = paper.rationale || ''
+        if (hasScreening) {
+          row['Screening Decision'] = paper.include || paper.decision || (paper.score !== undefined ? (paper.score >= 8 ? 'Yes' : paper.score >= 5 ? 'Not Sure' : 'No') : '')
+          row['Screening Explanation'] = paper.explanation || paper.rationale || ''
         }
 
         for (const f of extractionCols) {
@@ -868,7 +925,7 @@ function App() {
           row[f.name] = val
         }
 
-        row['Visibility in Stage'] = isPaperIncluded(paper, activeList.minScore) ? 'Included' : 'Hidden'
+        row['Visibility in Stage'] = isPaperIncluded(paper) ? 'Included' : 'Hidden'
         row['Has Attached Manuscript'] = paper.manuscript ? 'Yes' : 'No'
         return row
       })
@@ -896,10 +953,10 @@ function App() {
           { value: 'Abstract', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
         ]
 
-        if (hasScore) {
+        if (hasScreening) {
           headerRow.push(
-            { value: 'Inclusion Score', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
-            { value: 'AI Screening Rationale', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
+            { value: 'Screening Decision', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
+            { value: 'Screening Explanation', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
           )
         }
 
@@ -925,10 +982,10 @@ function App() {
             paper.abstract || '',
           ]
 
-          if (hasScore) {
+          if (hasScreening) {
             row.push(
-              paper.score !== undefined ? paper.score : '',
-              paper.rationale || '',
+              paper.include || paper.decision || (paper.score !== undefined ? (paper.score >= 8 ? 'Yes' : paper.score >= 5 ? 'Not Sure' : 'No') : ''),
+              paper.explanation || paper.rationale || '',
             )
           }
 
@@ -939,7 +996,7 @@ function App() {
           }
 
           row.push(
-            isPaperIncluded(paper, activeList.minScore) ? 'Included' : 'Hidden',
+            isPaperIncluded(paper) ? 'Included' : 'Hidden',
             paper.manuscript ? 'Yes' : 'No',
           )
 
@@ -956,8 +1013,8 @@ function App() {
           { width: 50 }, // Abstract
         ]
 
-        if (hasScore) {
-          columns.push({ width: 16 }, { width: 40 })
+        if (hasScreening) {
+          columns.push({ width: 18 }, { width: 45 })
         }
 
         for (let i = 0; i < extractionCols.length; i++) {
@@ -1115,12 +1172,20 @@ function App() {
             <div className="stat-cell">
               <span className="stat-label">INCLUDED IN STAGE</span>
               <strong>{includedCount.toLocaleString()}</strong>
-              <span className="stat-hint">{hiddenCount > 0 ? `${hiddenCount} hidden at score ${activeList?.minScore ?? 9}+` : `${activeList?.name ?? 'Current stage'}`}</span>
+              <span className="stat-hint">{hiddenCount > 0 ? `${hiddenCount} hidden from this stage` : `${activeList?.name ?? 'Current stage'}`}</span>
             </div>
             <div className="stat-cell">
-              <span className="stat-label">SCREENED</span>
+              <span className="stat-label">AI SCREENED</span>
               <strong>{screenedCount.toLocaleString()}</strong>
-              <span className="stat-hint">average score <b>{averageScore}</b> / 10</span>
+              <span className="stat-hint">
+                {screenedCount > 0 ? (
+                  <span className="screening-stat-breakdown">
+                    <b className="stat-breakdown-yes">{yesCount} Yes</b> · <b className="stat-breakdown-notsure">{notSureCount} Not Sure</b> · <b className="stat-breakdown-no">{noCount} No</b>
+                  </span>
+                ) : (
+                  'Title + abstract screening'
+                )}
+              </span>
             </div>
             <div className="stat-aside">
               <span className="stat-aside-mark"><ListFilter size={16} /></span>
@@ -1200,17 +1265,49 @@ function App() {
               {activeList.stageType !== 'synthesis' && (
                 <div className="toolbar-actions">
                   <div className="visibility-filter-tabs" role="group" aria-label="Filter visibility">
-                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'included' ? 'active' : ''}`} onClick={() => setVisibilityFilter('included')} title="Show papers matching inclusion score and manually shown"><Eye size={13} /><span>Included</span><span className="tab-pill-count">{includedCount}</span></button>
-                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'hidden' ? 'active' : ''}`} onClick={() => setVisibilityFilter('hidden')} title="Show papers below score threshold or manually hidden"><EyeOff size={13} /><span>Hidden</span><span className="tab-pill-count">{hiddenCount}</span></button>
+                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'included' ? 'active' : ''}`} onClick={() => setVisibilityFilter('included')} title="Show papers included in this stage"><Eye size={13} /><span>Included</span><span className="tab-pill-count">{includedCount}</span></button>
+                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'hidden' ? 'active' : ''}`} onClick={() => setVisibilityFilter('hidden')} title="Show papers hidden from this stage"><EyeOff size={13} /><span>Hidden</span><span className="tab-pill-count">{hiddenCount}</span></button>
                     <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'all' ? 'active' : ''}`} onClick={() => setVisibilityFilter('all')} title="Show all papers in this stage"><span>All</span><span className="tab-pill-count">{resolvedActiveListPapers.length}</span></button>
                   </div>
-                  {resolvedActiveListPapers.some((paper) => paper.score !== undefined) && (
-                    <label className="score-filter">
-                      <span>INCLUSION SCORE</span>
-                      <input type="range" min="0" max="10" step="1" value={activeList.minScore} onChange={(event) => updateProject(activeProject.id, (project) => ({ ...project, lists: project.lists.map((list) => list.id === activeList.id ? { ...list, minScore: Number(event.target.value) } : list) }))} />
-                      <strong>{activeList.minScore}+</strong>
-                    </label>
+
+                  {screenedCount > 0 && (
+                    <div className="decision-filter-group" role="group" aria-label="Filter by AI screening decision">
+                      <span className="decision-filter-label">DECISION:</span>
+                      <button
+                        type="button"
+                        className={`decision-filter-btn ${decisionFilter === 'all' ? 'active' : ''}`}
+                        onClick={() => setDecisionFilter('all')}
+                        title="Show all decisions"
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        className={`decision-filter-btn decision-btn-yes ${decisionFilter === 'Yes' ? 'active' : ''}`}
+                        onClick={() => setDecisionFilter(decisionFilter === 'Yes' ? 'all' : 'Yes')}
+                        title="Show papers classified as Yes (Include)"
+                      >
+                        <Check size={11} /> Yes ({yesCount})
+                      </button>
+                      <button
+                        type="button"
+                        className={`decision-filter-btn decision-btn-notsure ${decisionFilter === 'Not Sure' ? 'active' : ''}`}
+                        onClick={() => setDecisionFilter(decisionFilter === 'Not Sure' ? 'all' : 'Not Sure')}
+                        title="Show papers classified as Not Sure"
+                      >
+                        <CircleHelp size={11} /> Not Sure ({notSureCount})
+                      </button>
+                      <button
+                        type="button"
+                        className={`decision-filter-btn decision-btn-no ${decisionFilter === 'No' ? 'active' : ''}`}
+                        onClick={() => setDecisionFilter(decisionFilter === 'No' ? 'all' : 'No')}
+                        title="Show papers classified as No (Exclude)"
+                      >
+                        <X size={11} /> No ({noCount})
+                      </button>
+                    </div>
                   )}
+
                   <label className="search-box"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search papers" aria-label="Search papers" /><kbd>/</kbd></label>
                 </div>
               )}
@@ -1249,8 +1346,8 @@ function App() {
                           <th className="paper-heading">PAPER <span>{visiblePapers.length === resolvedActiveListPapers.length ? resolvedActiveListPapers.length.toLocaleString() : `${visiblePapers.length} of ${resolvedActiveListPapers.length}`}</span></th>
                           <th className="year-heading">YEAR</th>
                           <th className="journal-heading">SOURCE</th>
-                          {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => p.score !== undefined)) && (
-                            <th className="score-heading">INCLUSION</th>
+                          {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => (p.include || p.decision) !== undefined || p.score !== undefined)) && (
+                            <th className="decision-heading">AI DECISION</th>
                           )}
                           <th className="manuscript-action-heading">MANUSCRIPT</th>
                           {/* Dynamic Data Extraction Columns directly in the table */}
@@ -1266,7 +1363,9 @@ function App() {
                       </thead>
                       <tbody>
                         {visiblePapers.slice(0, 250).map((paper) => {
-                          const included = isPaperIncluded(paper, activeList.minScore)
+                          const included = isPaperIncluded(paper)
+                          const dec = paper.include || paper.decision || (paper.score !== undefined ? (paper.score >= 8 ? 'Yes' : paper.score >= 5 ? 'Not Sure' : 'No') : null)
+                          const expl = paper.explanation || paper.rationale
                           return (
                             <tr key={paper.id} className={`${selectedIds.has(paper.id) ? 'row-selected' : ''} ${included ? '' : 'row-hidden'}`}>
                               <td className="check-column">
@@ -1280,19 +1379,45 @@ function App() {
                               <td className="paper-cell">
                                 <a className="paper-title" href={paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : undefined)} target="_blank" rel="noreferrer" onClick={(event) => { if (!paper.url && !paper.doi) event.preventDefault() }}>{paper.title}</a>
                                 <span className="paper-authors">{paper.authors || 'Author not listed'}{paper.doi && <span className="doi-label">DOI {paper.doi}</span>}{paper.manualVisibility === 'show' && <span className="manual-vis-badge show-badge"><Eye size={10} /> Force Shown</span>}{paper.manualVisibility === 'hide' && <span className="manual-vis-badge hide-badge"><EyeOff size={10} /> Manually Hidden</span>}</span>
-                                {paper.abstract && <details className="abstract-details"><summary>Abstract</summary><p>{paper.abstract}</p></details>}
+                                {paper.abstract && (
+                                  <details className="abstract-details">
+                                    <summary>Abstract</summary>
+                                    <p>{paper.abstract}</p>
+                                    {expl && (
+                                      <div className="paper-inline-explanation">
+                                        <div className="inline-explanation-header">
+                                          <Sparkles size={11} />
+                                          <span>AI SCREENING EXPLANATION ({dec ? dec.toUpperCase() : 'EVALUATION'})</span>
+                                        </div>
+                                        <p className="inline-explanation-text">{expl}</p>
+                                      </div>
+                                    )}
+                                  </details>
+                                )}
                               </td>
                               <td className="year-cell">{paper.year || '—'}</td>
                               <td className="journal-cell">{paper.journal || '—'}</td>
-                              {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => p.score !== undefined)) && (
-                                <td className="score-cell">
-                                  {paper.score !== undefined ? (
-                                    <>
-                                      <span className={`score-pill ${paper.score >= 8 ? 'score-high' : paper.score >= 5 ? 'score-mid' : 'score-low'}`}>{paper.score}<span>/10</span></span>
-                                      {paper.rationale && <span className="score-reason" title={paper.rationale}>AI screened</span>}
-                                    </>
+                              {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => (p.include || p.decision) !== undefined || p.score !== undefined)) && (
+                                <td className="decision-cell">
+                                  {dec ? (
+                                    <div className="decision-cell-inner">
+                                      <span
+                                        className={`decision-pill ${dec === 'Yes' ? 'decision-yes' : dec === 'No' ? 'decision-no' : 'decision-notsure'}`}
+                                        title={expl || `Screened as ${dec}`}
+                                      >
+                                        {dec === 'Yes' && <Check size={11} />}
+                                        {dec === 'Not Sure' && <CircleHelp size={11} />}
+                                        {dec === 'No' && <X size={11} />}
+                                        <span>{dec}</span>
+                                      </span>
+                                      {expl && (
+                                        <span className="decision-reason" title={expl}>
+                                          {expl}
+                                        </span>
+                                      )}
+                                    </div>
                                   ) : (
-                                    <span className="not-screened">Not screened</span>
+                                    <span className="not-screened">Unscreened</span>
                                   )}
                                 </td>
                               )}
@@ -1326,17 +1451,17 @@ function App() {
                       </tbody>
                     </table>
                     {visiblePapers.length > 250 && <div className="table-limit-note">Showing the first 250 matches. Narrow the search to see more.</div>}
-                    {!visiblePapers.length && <div className="no-matches"><Search size={18} /><span>{visibilityFilter === 'hidden' ? 'No hidden papers in this stage.' : 'No papers match this search, score threshold, and visibility filter.'}</span></div>}
+                    {!visiblePapers.length && <div className="no-matches"><Search size={18} /><span>{visibilityFilter === 'hidden' ? 'No hidden papers in this stage.' : 'No papers match this search and filter criteria.'}</span></div>}
                   </div>
                 ) : (
                   <div className="empty-list">
                     <span className="empty-list-icon"><FileSpreadsheet size={22} /></span>
                     <div>
-                      <h3>{activeList.papers.length ? 'No papers at this score' : 'Bring in your search results or copy papers here'}</h3>
-                      <p>{activeList.papers.length ? `No screened papers score ${activeList.minScore} or higher. Lower the threshold to review more.` : 'Upload a CSV or Excel file, or copy papers from an earlier stage.'}</p>
+                      <h3>{activeList.papers.length ? 'No papers matching this filter' : 'Bring in your search results or copy papers here'}</h3>
+                      <p>{activeList.papers.length ? 'Adjust your visibility or decision filters to see more papers.' : 'Upload a CSV or Excel file, or copy papers from an earlier stage.'}</p>
                     </div>
                     {activeList.papers.length ? (
-                      <button className="button button-secondary" onClick={() => updateProject(activeProject.id, (project) => ({ ...project, lists: project.lists.map((list) => list.id === activeList.id ? { ...list, minScore: 0 } : list) }))}>Show all scores</button>
+                      <button className="button button-secondary" onClick={() => { setVisibilityFilter('all'); setDecisionFilter('all'); setSearch('') }}>Reset filters</button>
                     ) : (
                       <button className="button button-secondary" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Choose file</button>
                     )}
@@ -1777,7 +1902,7 @@ function App() {
                 disabled={screening || extracting || synthesizing}
               />
               <p className="modal-privacy">
-                Titles and abstracts of the {selectedPapers.length} selected papers will be evaluated by LLM to assign confidence scores (0-10) in the destination stage.
+                Titles and abstracts of the {selectedPapers.length} selected papers will be evaluated by LLM to classify inclusion (Yes, No, Not Sure) with detailed evidence-based explanations in the destination stage.
               </p>
             </div>
           )}

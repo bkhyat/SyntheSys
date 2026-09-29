@@ -66,6 +66,9 @@ class ProjectPaperInput(BaseModel):
     doi: str = ""
     url: str = ""
     abstract: str = ""
+    include: str | None = None
+    decision: str | None = None
+    explanation: str | None = None
     score: int | None = Field(default=None, ge=0, le=10)
     rationale: str | None = None
     manual_visibility: str | None = Field(default=None, alias="manualVisibility")

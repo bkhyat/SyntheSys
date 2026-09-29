@@ -7,7 +7,7 @@
 ## 🌟 Key Features
 
 ### 1. Multi-Stage Systematic Review Workflow
-- **Identification & Screening (Stage 1)**: Import CSV/Excel bibliographies (PubMed, Scopus, Web of Science, arXiv). Run AI-assisted title and abstract screening with confidence scoring (0–10), evidence-based rationales, and threshold sliders.
+- **Identification & Screening (Stage 1)**: Import CSV/Excel bibliographies (PubMed, Scopus, Web of Science, arXiv). Run AI-assisted title and abstract screening with discrete inclusion decisions (`Yes`, `No`, `Not Sure`), evidence-based explanations, and fast interactive decision filtering.
 - **Full-Text Eligibility (Stage 2)**: Attach full-text PDF manuscripts, verify inclusion/exclusion criteria, and manage candidate papers.
 - **AI Data Extraction (Stage 3)**: Extract custom user-defined research fields (e.g., *Methodology*, *Benchmark Datasets*, *Evaluation Metrics*, *Limitations*) across papers into structured, interactive data tables.
 - **Systematic Synthesis (Stage 4)**: Generate comprehensive, PRISMA/SLR-style narrative syntheses that group papers by methodological paradigms, compare strengths and trade-offs, and outline research gaps. Features a dual **View / Edit** markdown mode, full **LaTeX formula rendering** ($\text{IC}_{50}$, mathematical equations), ASCII hierarchy trees, one-click copy, and persistent revision drafts.

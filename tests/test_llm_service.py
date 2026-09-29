@@ -95,8 +95,9 @@ class LLMServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_screen_papers_with_gemini(self, mock_gemini_json):
         mock_gemini_json.return_value = json.dumps({
             "results": [
-                {"id": "paper-1", "score": 9, "rationale": "High quality randomized trial on topic."},
-                {"id": "paper-2", "score": 2, "rationale": "Animal study, clearly excluded."},
+                {"id": "paper-1", "include": "Yes", "explanation": "High quality randomized trial on topic."},
+                {"id": "paper-2", "include": "No", "explanation": "Animal study, clearly excluded."},
+                {"id": "paper-3", "include": "Not Sure", "explanation": "Abstract lacks dosage details."},
             ]
         })
 
@@ -106,17 +107,26 @@ class LLMServiceTests(unittest.IsolatedAsyncioTestCase):
             papers=[
                 PaperInput(id="paper-1", title="RCT Study in Adults", abstract="Abstract 1"),
                 PaperInput(id="paper-2", title="Mouse Study", abstract="Abstract 2"),
+                PaperInput(id="paper-3", title="Pilot Study", abstract="Abstract 3"),
             ],
         )
 
         with patch.dict("os.environ", {"GEMINI_API_KEY": "valid_mock_gemini_key", "LLM_PROVIDER": "auto"}):
             results = await screen_papers_with_llm(screen_req)
 
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(results), 3)
         self.assertEqual(results[0]["id"], "paper-1")
-        self.assertEqual(results[0]["score"], 9)
+        self.assertEqual(results[0]["include"], "Yes")
+        self.assertEqual(results[0]["decision"], "Yes")
+        self.assertEqual(results[0]["explanation"], "High quality randomized trial on topic.")
         self.assertEqual(results[1]["id"], "paper-2")
-        self.assertEqual(results[1]["score"], 2)
+        self.assertEqual(results[1]["include"], "No")
+        self.assertEqual(results[1]["decision"], "No")
+        self.assertEqual(results[1]["explanation"], "Animal study, clearly excluded.")
+        self.assertEqual(results[2]["id"], "paper-3")
+        self.assertEqual(results[2]["include"], "Not Sure")
+        self.assertEqual(results[2]["decision"], "Not Sure")
+        self.assertEqual(results[2]["explanation"], "Abstract lacks dosage details.")
         mock_gemini_json.assert_called_once()
 
     async def test_get_llm_status_structure(self):

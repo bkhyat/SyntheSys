@@ -55,8 +55,10 @@ class ScreeningInput(BaseModel):
 
 class ScreeningResult(BaseModel):
     id: str
-    score: int = Field(ge=0, le=10)
-    rationale: str
+    include: str = Field(description="Inclusion decision: 'Yes', 'No', or 'Not Sure'")
+    explanation: str = Field(description="Detailed reason explaining why include is Yes, No, or Not Sure")
+    score: int | None = None
+    rationale: str | None = None
 
 
 class ScreeningOutput(BaseModel):
@@ -527,7 +529,7 @@ def _apply_summaries_to_document(
 async def screen_papers_with_llm(screen_request: ScreeningInput, timeout: float = 90.0) -> list[dict[str, Any]]:
     """
     Screen scientific papers against inclusion/exclusion criteria using Google Gemini API.
-    Returns a list of dicts with {"id": ..., "score": ..., "rationale": ...}.
+    Returns a list of dicts with {"id": ..., "include": "Yes"|"No"|"Not Sure", "explanation": "..."}.
     """
     papers = [paper.model_dump() for paper in screen_request.papers]
     paper_ids = [p["id"] for p in papers]
@@ -536,22 +538,37 @@ async def screen_papers_with_llm(screen_request: ScreeningInput, timeout: float 
     provider_pref = os.getenv("LLM_PROVIDER", "auto").lower()
     if provider_pref == "mock":
         return [
-            {"id": pid, "score": 8, "rationale": "Mock screening match."}
+            {
+                "id": pid,
+                "include": "Yes",
+                "decision": "Yes",
+                "explanation": "Mock screening match meeting inclusion criteria.",
+                "rationale": "Mock screening match meeting inclusion criteria.",
+                "score": 10,
+            }
             for pid in paper_ids
         ]
 
     prompt = (
-        "Screen each scientific paper for a systematic review. Use title and abstract only. "
-        "Score confidence that it belongs in the next review stage from 0 (clearly exclude) "
-        "to 10 (strongly include). Exclusion criteria override inclusion criteria. If abstract "
-        "is missing, be cautious and say so. Do not infer unsupported facts.\n\n"
+        "You are an expert scientific systematic literature review screener. "
+        "Screen each scientific paper based on its title and abstract against the specified inclusion and exclusion criteria.\n\n"
+        "For each paper, provide:\n"
+        "1. 'include': Exactly one of 'Yes', 'No', or 'Not Sure'.\n"
+        "   - 'Yes': The paper clearly meets the inclusion criteria and does not meet any exclusion criteria.\n"
+        "   - 'No': The paper clearly violates the inclusion criteria or meets one or more exclusion criteria.\n"
+        "   - 'Not Sure': The title/abstract provides insufficient evidence to definitively decide, or the study is borderline.\n"
+        "2. 'explanation': A concise, factual explanation explaining why include is Yes, No, or Not Sure, referencing specific details from the title and abstract.\n\n"
+        "Rules:\n"
+        "- Exclusion criteria strictly override inclusion criteria.\n"
+        "- If abstract is missing or minimal, select 'Not Sure' and state that full-text review is required.\n"
+        "- Do not extrapolate or fabricate unsupported facts.\n\n"
         f"Inclusion criteria:\n{screen_request.inclusion_criteria.strip()}\n\n"
         f"Exclusion criteria:\n{exclusion_criteria}\n\n"
-        f"Papers:\n{json.dumps(papers, ensure_ascii=False, indent=2)}\n\n"
+        f"Papers to screen:\n{json.dumps(papers, ensure_ascii=False, indent=2)}\n\n"
         "Return ONLY a JSON object with this exact structure:\n"
         "{\n"
         '  "results": [\n'
-        '    {"id": "paper_id", "score": 8, "rationale": "brief evidence-based reason"}\n'
+        '    {"id": "paper_id", "include": "Yes", "explanation": "Evidence-based reason why include is Yes, No, or Not Sure"}\n'
         "  ]\n"
         "}\n"
         "Include exactly one result for every input paper id."
@@ -570,10 +587,13 @@ async def screen_papers_with_llm(screen_request: ScreeningInput, timeout: float 
                     "type": "OBJECT",
                     "properties": {
                         "id": {"type": "STRING"},
-                        "score": {"type": "INTEGER"},
-                        "rationale": {"type": "STRING"},
+                        "include": {
+                            "type": "STRING",
+                            "enum": ["Yes", "No", "Not Sure"],
+                        },
+                        "explanation": {"type": "STRING"},
                     },
-                    "required": ["id", "score", "rationale"],
+                    "required": ["id", "include", "explanation"],
                 },
             },
         },
@@ -589,18 +609,41 @@ async def screen_papers_with_llm(screen_request: ScreeningInput, timeout: float 
         raise RuntimeError(f"Gemini screening failed: {exc}") from exc
 
 
+def _normalize_include(val: Any) -> str:
+    s = str(val or "").strip()
+    if s.lower() in ("yes", "include", "included", "true"):
+        return "Yes"
+    if s.lower() in ("no", "exclude", "excluded", "false"):
+        return "No"
+    return "Not Sure"
+
+
 def _format_screening_results(paper_ids: list[str], screening_output: ScreeningOutput) -> list[dict[str, Any]]:
     """Format and validate screening results against expected paper IDs."""
     results_by_id = {result.id: result for result in screening_output.results}
     formatted = []
     for paper_id in paper_ids:
         if paper_id in results_by_id:
-            formatted.append(results_by_id[paper_id].model_dump())
+            res = results_by_id[paper_id]
+            norm_include = _normalize_include(res.include)
+            explanation = res.explanation or res.rationale or ""
+            score_equiv = 10 if norm_include == "Yes" else 0 if norm_include == "No" else 5
+            formatted.append({
+                "id": paper_id,
+                "include": norm_include,
+                "decision": norm_include,
+                "explanation": explanation,
+                "rationale": explanation,
+                "score": score_equiv,
+            })
         else:
             formatted.append({
                 "id": paper_id,
-                "score": 5,
+                "include": "Not Sure",
+                "decision": "Not Sure",
+                "explanation": "Model provided evaluation across batch without specific ID match.",
                 "rationale": "Model provided evaluation across batch without specific ID match.",
+                "score": 5,
             })
     return formatted
 
@@ -816,6 +859,9 @@ class SynthesisPaperItem(BaseModel):
     doi: str = ""
     url: str = ""
     abstract: str = ""
+    include: str | None = None
+    decision: str | None = None
+    explanation: str | None = None
     score: int | None = None
     rationale: str | None = None
     extracted_data: dict[str, Any] = Field(default_factory=dict, alias="extractedData")
@@ -849,10 +895,15 @@ async def synthesize_papers_with_llm(
             "journal": p.journal or "Unspecified journal",
             "abstract": p.abstract or "No abstract available",
         }
-        if p.score is not None:
+        dec = p.include or p.decision
+        if dec:
+            item["screening_decision"] = dec
+        elif p.score is not None:
             item["screening_score"] = f"{p.score}/10"
-        if p.rationale:
-            item["screening_rationale"] = p.rationale
+        
+        expl = p.explanation or p.rationale
+        if expl:
+            item["screening_explanation"] = expl
         if p.extracted_data:
             item["extracted_fields"] = p.extracted_data
         papers_data.append(item)
