@@ -12,64 +12,19 @@ import {
   LoaderCircle,
   Maximize2,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Table2,
   X,
 } from 'lucide-react'
 import './ManuscriptPanel.css'
-import type { ManuscriptMetadata } from './types'
-
-type LineReference = { page_number: number; line_number: number }
-type BoundingBox = { x0: number; top: number; x1: number; bottom: number }
-type DocumentLine = { page_number: number; line_number: number; text: string; bbox: BoundingBox; font_size: number }
-type Section = {
-  title: string
-  original_title?: string
-  standard_section?: string | null
-  is_excluded_from_llm?: boolean
-  level: number
-  start_page: number
-  end_page: number
-  start_line: number
-  line_refs: LineReference[]
-  children: Section[]
-  summary?: string
-}
-type MappedSectionItem = {
-  standard_section: string
-  original_title: string
-  page: number
-  line: number
-  level: number
-}
-type UnmatchedSectionItem = {
-  original_title: string
-  page: number
-  line: number
-  level: number
-}
-type ReferencesSectionItem = {
-  original_title: string
-  page: number
-  line: number
-  line_count: number
-}
-type Figure = { label: string; caption: string; page_number: number; line_refs: LineReference[]; image_bbox?: BoundingBox }
-type Table = {
-  label: string; caption: string | null; page_number: number; bbox: BoundingBox
-  line_refs: LineReference[]; cells: (string | null)[][]
-}
-type Reference = { label: string; text: string; page_number: number; line_refs: LineReference[] }
-type ManuscriptDocument = {
-  file_name: string; page_count: number; line_count: number; extracted_at: string
-  overall_summary?: string
-  sections: Section[]
-  mapped_sections?: MappedSectionItem[]
-  unmatched_sections?: UnmatchedSectionItem[]
-  references_section?: ReferencesSectionItem | null
-  pages: { page_number: number; width: number; height: number; lines: DocumentLine[] }[]
-  figures: Figure[]; tables: Table[]; references: Reference[]; warnings: string[]
-}
+import SectionMappingModal from './SectionMappingModal'
+import type {
+  DocumentLine,
+  ManuscriptDocument,
+  ManuscriptMetadata,
+  SectionNode as Section,
+} from './types'
 
 type ExtractedFieldValue = string | { value?: string }
 
@@ -448,6 +403,7 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
   const [rawLineMode, setRawLineMode] = useState(false)
   const [generatingSummaries, setGeneratingSummaries] = useState(false)
   const [summaryError, setSummaryError] = useState('')
+  const [mappingModalOpen, setMappingModalOpen] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -604,17 +560,28 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
                           <span>CANONICAL SECTION MAPPINGS</span>
                           <span className="mapping-count-badge">{document.mapped_sections?.length || 0} mapped</span>
                         </div>
-                        {document.references_section && (
+                        <div className="mapping-overview-actions">
+                          {document.references_section && (
+                            <button
+                              type="button"
+                              className="references-mapped-indicator"
+                              onClick={() => jumpToSection(document.references_section!.page, document.references_section!.line)}
+                              title="Jump to References Section in PDF"
+                            >
+                              <FileText size={11} />
+                              <span>References mapped ({document.references.length} citations)</span>
+                            </button>
+                          )}
                           <button
                             type="button"
-                            className="references-mapped-indicator"
-                            onClick={() => jumpToSection(document.references_section!.page, document.references_section!.line)}
-                            title="Jump to References Section in PDF"
+                            className="edit-mappings-btn"
+                            onClick={() => setMappingModalOpen(true)}
+                            title="Edit or manually map sections"
                           >
-                            <FileText size={11} />
-                            <span>References mapped ({document.references.length} citations)</span>
+                            <SlidersHorizontal size={11} />
+                            <span>Map Sections</span>
                           </button>
-                        )}
+                        </div>
                       </div>
 
                       {document.mapped_sections && document.mapped_sections.length > 0 && (
@@ -651,6 +618,14 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
                               </button>
                             ))}
                           </div>
+                          <button
+                            type="button"
+                            className="unmatched-map-action-btn"
+                            onClick={() => setMappingModalOpen(true)}
+                            title="Manually map unassigned sections"
+                          >
+                            <SlidersHorizontal size={10} /> Map Unassigned
+                          </button>
                         </div>
                       )}
                     </div>
@@ -708,6 +683,14 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
                           <Sparkles size={12} /> Summaries
                         </button>
                       )}
+                      <button
+                        type="button"
+                        className="toolbar-btn"
+                        onClick={() => setMappingModalOpen(true)}
+                        title="Map or edit canonical sections"
+                      >
+                        <SlidersHorizontal size={12} /> Map Sections
+                      </button>
                       <button
                         type="button"
                         className="toolbar-btn"
@@ -991,6 +974,18 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
           )}
         </main>
       </section>
+
+      {mappingModalOpen && document && (
+        <SectionMappingModal
+          paperId={paper.id}
+          paperTitle={paper.title}
+          document={document}
+          onClose={() => setMappingModalOpen(false)}
+          onSave={(updatedDoc) => {
+            setDocument(updatedDoc)
+          }}
+        />
+      )}
     </div>
   )
 }

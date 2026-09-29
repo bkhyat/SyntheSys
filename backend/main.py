@@ -30,6 +30,7 @@ from .llm_service import (
     synthesize_papers_with_llm,
 )
 from .pdf_parser import extract_manuscript
+from .section_matcher import apply_manual_section_mappings
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +44,18 @@ MANUSCRIPT_ROOT = Path(
 )
 
 app = FastAPI(title="SyntheSys Screening & Synthesis API", version="0.1.0")
+
+
+class SectionMappingItem(BaseModel):
+    original_title: str = Field(default="")
+    page: int | None = Field(default=None)
+    line: int | None = Field(default=None)
+    standard_section: str | None = Field(default=None)
+    is_excluded: bool | None = Field(default=None)
+
+
+class UpdateSectionMappingsRequest(BaseModel):
+    mappings: list[SectionMappingItem] = Field(default_factory=list)
 
 
 class ManuscriptMetadataInput(BaseModel):
@@ -174,12 +187,26 @@ async def upload_manuscript(paper_id: str, file: UploadFile = File(...)) -> JSON
         "line_count": document["line_count"],
         "extracted_at": extracted_at,
         "warnings": document["warnings"],
+        "document": document,
     })
 
 
 @app.get("/api/papers/{paper_id}/manuscript")
 async def get_manuscript(paper_id: str) -> dict[str, Any]:
     return await _get_current_manuscript(paper_id)
+
+
+@app.put("/api/papers/{paper_id}/section-mappings")
+async def update_section_mappings_endpoint(
+    paper_id: str,
+    request: UpdateSectionMappingsRequest,
+) -> dict[str, Any]:
+    document = await _get_current_manuscript(paper_id)
+    pdf_bytes = await run_in_threadpool(database.get_manuscript_pdf, paper_id)
+    mappings_data = [item.model_dump() for item in request.mappings]
+    document = apply_manual_section_mappings(document, mappings_data)
+    await run_in_threadpool(database.save_manuscript, document, pdf_bytes, None)
+    return document
 
 
 @app.post("/api/papers/{paper_id}/summarize")

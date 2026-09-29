@@ -273,6 +273,50 @@ class ManuscriptApiTests(unittest.TestCase):
         get_res_after = client.get("/api/projects")
         self.assertEqual(len(get_res_after.json()), 0)
 
+    def test_manual_section_mappings_endpoint(self):
+        pdf_bytes = make_test_pdf()
+        client = TestClient(backend.app)
+        upload_res = client.post(
+            "/api/papers/paper-1/manuscript",
+            files={"file": ("study.pdf", pdf_bytes, "application/pdf")},
+        )
+        self.assertEqual(upload_res.status_code, 200)
+        self.assertIn("document", upload_res.json())
+
+        # Update section mappings manually: map "1.1. Study population" to "Methods"
+        update_res = client.put(
+            "/api/papers/paper-1/section-mappings",
+            json={
+                "mappings": [
+                    {
+                        "original_title": "1.1. Study population",
+                        "page": 1,
+                        "line": 3,
+                        "standard_section": "Methods",
+                        "is_excluded": False,
+                    },
+                ]
+            },
+        )
+        self.assertEqual(update_res.status_code, 200, update_res.text)
+        updated_doc = update_res.json()
+        self.assertIn("mapped_sections", updated_doc)
+
+        # Verify mapped section
+        has_methods_mapping = any(
+            m["standard_section"] == "Methods" and "Study population" in m["original_title"]
+            for m in updated_doc.get("mapped_sections", [])
+        )
+        self.assertTrue(has_methods_mapping)
+
+        # Verify get endpoint returns updated document
+        get_res = client.get("/api/papers/paper-1/manuscript")
+        self.assertEqual(get_res.status_code, 200)
+        self.assertTrue(any(
+            m["standard_section"] == "Methods" and "Study population" in m["original_title"]
+            for m in get_res.json().get("mapped_sections", [])
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

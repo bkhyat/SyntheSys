@@ -77,6 +77,51 @@
   font-size: 7.5px;
   font-weight: 600;
 }
+.mapping-overview-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.edit-mappings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid #c2dbca;
+  border-radius: 3px;
+  background: #eef6f0;
+  color: #1f6b3e;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.edit-mappings-btn:hover {
+  background: #e0f0e4;
+  border-color: #2b7654;
+  color: #155730;
+}
+.unmatched-map-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid #ebd0ad;
+  border-radius: 3px;
+  background: #fdfaf4;
+  color: #8c5310;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: auto;
+  transition: all .15s ease;
+}
+.unmatched-map-action-btn:hover {
+  background: #faedd9;
+  border-color: #b56c18;
+}
 .references-mapped-indicator {
   display: inline-flex;
   align-items: center;

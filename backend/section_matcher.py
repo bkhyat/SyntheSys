@@ -432,3 +432,70 @@ def build_substantive_manuscript_text(
         current_len += len(text) + 1
 
     return "\n".join(accumulated)
+
+
+def apply_manual_section_mappings(
+    document: dict[str, Any],
+    manual_mappings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Apply user-defined manual mappings to the document's section tree.
+    manual_mappings item format:
+    {
+        "page": int (optional),
+        "line": int (optional),
+        "original_title": str,
+        "standard_section": str | None,
+        "is_excluded": bool | None,
+    }
+    """
+    mapping_lookup: dict[Any, dict[str, Any]] = {}
+    for m in manual_mappings:
+        orig = m.get("original_title", "").strip()
+        page = m.get("page")
+        line = m.get("line")
+        if page is not None and line is not None:
+            mapping_lookup[(page, line)] = m
+        if orig:
+            mapping_lookup[orig.casefold()] = m
+
+    def _update_node(node: dict[str, Any]) -> None:
+        orig = node.get("original_title") or node.get("title", "")
+        page = node.get("start_page")
+        line = node.get("start_line")
+
+        target_mapping = None
+        if (page, line) in mapping_lookup:
+            target_mapping = mapping_lookup[(page, line)]
+        elif orig.strip().casefold() in mapping_lookup:
+            target_mapping = mapping_lookup[orig.strip().casefold()]
+
+        if target_mapping:
+            std = target_mapping.get("standard_section")
+            if std in ("", "None", "Unmapped", "null", None):
+                std = None
+            elif std == "Administrative (Excluded)":
+                std = None
+                target_mapping["is_excluded"] = True
+
+            node["standard_section"] = std
+
+            if "is_excluded" in target_mapping and target_mapping["is_excluded"] is not None:
+                node["is_excluded_from_llm"] = bool(target_mapping["is_excluded"])
+            elif std == "References":
+                node["is_excluded_from_llm"] = True
+            elif std:
+                node["is_excluded_from_llm"] = False
+
+        if node.get("children"):
+            for child in node["children"]:
+                _update_node(child)
+
+    for sec in document.get("sections", []):
+        _update_node(sec)
+
+    summary = extract_section_mappings_summary(document)
+    document["mapped_sections"] = summary["mapped_sections"]
+    document["unmatched_sections"] = summary["unmatched_sections"]
+    document["references_section"] = summary["references_section"]
+    return document

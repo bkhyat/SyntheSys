@@ -4,8 +4,9 @@ import Papa from 'papaparse'
 import readXlsxFile from 'read-excel-file/browser'
 import writeXlsxFile from 'write-excel-file/browser'
 import ManuscriptPanel from './ManuscriptPanel'
+import SectionMappingModal from './SectionMappingModal'
 import SynthesisStudio from './SynthesisStudio'
-import type { ManuscriptMetadata } from './types'
+import type { ManuscriptDocument, ManuscriptMetadata } from './types'
 
 export type ManualVisibility = 'show' | 'hide'
 export type VisibilityFilter = 'included' | 'hidden' | 'all'
@@ -175,6 +176,12 @@ function App() {
   const manuscriptTargetRef = useRef<string | null>(null)
   const [uploadingPaperId, setUploadingPaperId] = useState<string | null>(null)
   const [manuscriptPaper, setManuscriptPaper] = useState<Paper | null>(null)
+  const [sectionMappingTarget, setSectionMappingTarget] = useState<{
+    paperId: string
+    paperTitle: string
+    document: ManuscriptDocument
+    isInitialUpload?: boolean
+  } | null>(null)
 
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null
   const activeList = activeProject?.lists.find((list) => list.id === activeListId) ?? null
@@ -597,7 +604,7 @@ function App() {
       })
       const payload = await response.json() as {
         paper_id?: string; file_name?: string; page_count?: number; line_count?: number
-        extracted_at?: string; warnings?: string[]; detail?: string
+        extracted_at?: string; warnings?: string[]; detail?: string; document?: ManuscriptDocument
       }
       if (!response.ok) throw new Error(payload.detail || 'Could not attach this PDF.')
       const manuscript: ManuscriptMetadata = {
@@ -620,6 +627,29 @@ function App() {
         }),
       }))
       setToast(`${manuscript.fileName} parsed and attached`)
+
+      const targetPaper = activeProject.lists[0]?.papers.find((p) => p.id === paperId)
+      const targetTitle = (targetPaper && 'title' in targetPaper ? targetPaper.title : undefined) || file.name
+      if (payload.document) {
+        setSectionMappingTarget({
+          paperId,
+          paperTitle: targetTitle,
+          document: payload.document,
+          isInitialUpload: true,
+        })
+      } else {
+        fetch(`/api/papers/${encodeURIComponent(paperId)}/manuscript`)
+          .then((res) => res.json())
+          .then((doc: ManuscriptDocument) => {
+            setSectionMappingTarget({
+              paperId,
+              paperTitle: targetTitle,
+              document: doc,
+              isInitialUpload: true,
+            })
+          })
+          .catch(() => {})
+      }
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Could not attach this PDF.')
     } finally {
@@ -1475,6 +1505,20 @@ function App() {
 
     <input ref={manuscriptInputRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={(event) => void handleManuscriptFile(event.target.files?.[0])} />
     {manuscriptPaper?.manuscript && <ManuscriptPanel paper={manuscriptPaper as Paper & { manuscript: ManuscriptMetadata }} onClose={() => setManuscriptPaper(null)} />}
+
+    {/* Section Mapping Modal (Triggered on PDF Upload or on demand) */}
+    {sectionMappingTarget && (
+      <SectionMappingModal
+        paperId={sectionMappingTarget.paperId}
+        paperTitle={sectionMappingTarget.paperTitle}
+        document={sectionMappingTarget.document}
+        isInitialUpload={sectionMappingTarget.isInitialUpload}
+        onClose={() => setSectionMappingTarget(null)}
+        onSave={() => {
+          setToast('Section mappings saved successfully')
+        }}
+      />
+    )}
 
     {/* Selection Bar */}
     {activeList && selectedIds.size > 0 && <div className="selection-bar">
