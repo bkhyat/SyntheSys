@@ -363,10 +363,24 @@ def _build_outline(lines: list[dict[str, Any]], body_size: float) -> list[dict[s
     stack: list[dict[str, Any]] = []
     preamble_lines: list[dict[str, Any]] = []
 
+    def _in_reference_section() -> bool:
+        return any(
+            n["title"].strip().rstrip(":").casefold() in _REFERENCE_HEADINGS
+            for n in stack
+        )
+
     for line in lines:
+        cleaned_text = line["text"].strip().rstrip(":")
+        casefolded = cleaned_text.casefold()
         level = _heading_level(line["text"], line["font_size"], body_size)
-        reference_heading = line["text"].strip().rstrip(":").casefold() in _REFERENCE_HEADINGS
+        reference_heading = casefolded in _REFERENCE_HEADINGS
         is_numbered_reference_heading = reference_heading and _NUMBERED_HEADING.match(line["text"])
+
+        # If inside references section, ignore numbered citation lines that are not new major sections
+        if _in_reference_section() and not reference_heading:
+            if casefolded not in _NON_REFERENCE_HEADINGS and casefolded not in _SECTION_HEADINGS:
+                level = None
+
         if level is not None and not is_numbered_reference_heading:
             if preamble_lines and not roots:
                 # Add preamble node for lines preceding the first formal section

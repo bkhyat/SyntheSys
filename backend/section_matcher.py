@@ -90,47 +90,73 @@ _STANDARD_SYNONYMS: dict[str, list[str]] = {
     ],
     "Results": [
         "results",
+        "result",
         "experimental results",
+        "experimental result",
         "findings",
+        "finding",
         "evaluation",
+        "evaluations",
         "experiments",
+        "experiment",
         "experiments and results",
         "empirical evaluation",
         "empirical results",
+        "empirical analysis",
         "performance evaluation",
+        "performance analysis",
+        "performance comparison",
         "benchmark results",
         "benchmarking",
+        "benchmarking results",
         "outcomes",
+        "outcome",
         "analysis and results",
         "case study",
         "case studies",
         "observations",
+        "observation",
         "experimental validation",
-        "simulations",
+        "validation results",
         "simulation results",
+        "simulations",
         "numerical results",
+        "numerical experiments",
         "ablation study",
         "ablation studies",
+        "ablation experiment",
+        "ablation experiments",
+        "comparative results",
+        "comparison results",
+        "main results",
     ],
     "Discussion": [
         "discussion",
+        "discussions",
         "results and discussion",
+        "results & discussion",
         "interpretation",
         "implications",
         "comparative analysis",
         "discussion and analysis",
         "general discussion",
+        "critical discussion",
     ],
     "Conclusion": [
         "conclusion",
         "conclusions",
         "concluding remarks",
+        "concluding remark",
         "summary and conclusions",
+        "summary and conclusion",
         "final remarks",
         "concluding discussion",
         "conclusions and outlook",
         "concluding summary",
         "closing remarks",
+        "closing remark",
+        "discussion and conclusion",
+        "discussion and conclusions",
     ],
     "Limitations": [
         "limitation",
@@ -142,14 +168,17 @@ _STANDARD_SYNONYMS: dict[str, list[str]] = {
         "weaknesses",
         "delimitations",
         "limitations and threats to validity",
+        "limitations of the study",
     ],
     "Future Directions": [
         "future directions",
+        "future direction",
         "future work",
         "future works",
         "future research",
         "future prospects",
         "future perspectives",
+        "future perspective",
         "open problems",
         "open challenges",
         "extensions",
@@ -199,7 +228,7 @@ _EXCLUDED_SECTION_PATTERNS = [
 def clean_section_heading(title: str) -> str:
     """
     Clean section heading by stripping numbering, punctuation, roman numerals,
-    colons, and excess whitespace.
+    colons, excess whitespace, and separating concatenated / camelCase words.
     """
     cleaned = title.strip()
     # Strip leading numbering (e.g. "1.", "1.2", "Section 2:", "III.", "[1]", etc.)
@@ -209,12 +238,23 @@ def clean_section_heading(title: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     ).strip()
+    # Separate concatenated 'and' (e.g., "ResultsandDiscussion" -> "Results and Discussion")
+    cleaned = re.sub(r"(?i)\b(results?|materials?|methods?|findings?)(and)\b", r"\1 \2", cleaned)
+    cleaned = re.sub(r"(?i)(results?|materials?|methods?|findings?)(and)(discussion|methods?|materials?|results?|analysis)", r"\1 \2 \3", cleaned)
+    # Separate camelCase words like "PerformanceComparison" -> "Performance Comparison"
+    cleaned = re.sub(r"([a-z])([A-Z])", r"\1 \2", cleaned)
+    cleaned = re.sub(r"(?i)\b(results?|materials?|methods?|findings?)(and)\b", r"\1 \2", cleaned)
+    cleaned = re.sub(r"(?i)\b(related)(works?)\b", r"\1 \2", cleaned)
+    cleaned = re.sub(r"(?i)\b(prior)(works?)\b", r"\1 \2", cleaned)
+    cleaned = re.sub(r"(?i)\b(data)(preparation|preprocessing|collection|splitting)\b", r"\1 \2", cleaned)
+    cleaned = re.sub(r"(?i)\b(experimental)(setup|settings?|design|results?)\b", r"\1 \2", cleaned)
+    cleaned = re.sub(r"(?i)\b(ablation)(study|studies|experiment|experiments)\b", r"\1 \2", cleaned)
     # Strip trailing punctuation/colons
     cleaned = re.sub(r"[\s\:\-\–\.]+$", "", cleaned).strip()
     return cleaned
 
 
-def match_standard_section(title: str) -> tuple[str | None, bool]:
+def match_standard_section(title: str, is_top_level: bool = True) -> tuple[str | None, bool]:
     """
     Match a manuscript section title to canonical standard sections.
     Returns:
@@ -236,68 +276,71 @@ def match_standard_section(title: str) -> tuple[str | None, bool]:
             is_excluded = (std_name == "References")
             return std_name, is_excluded
 
-    # 3. Normalized phrase / regex heuristic matches
-    # References
-    if any(ref_word in casefolded for ref_word in ["references", "bibliography", "literature cited", "works cited"]):
+    # 3. Explicit standalone or prefix heading pattern matches
+    if re.search(r"^(references?|bibliograph(y|ies)|literature\s+cited|works\s+cited)(\b|:|$)", casefolded):
         return "References", True
 
-    # Limitations
-    if any(kw in casefolded for kw in ["limitation", "limitations", "threats to validity"]):
+    if re.search(r"\b(limitations?|threats\s+to\s+validity|study\s+limitations?)\b", casefolded):
         return "Limitations", False
 
-    # Future Directions
-    if any(kw in casefolded for kw in ["future work", "future direction", "future research", "future prospect", "future perspective"]):
+    if re.search(r"\b(future\s+(work|works|direction|directions|research|prospects?|perspectives?)|next\s+steps|open\s+(problems|challenges))\b", casefolded):
         return "Future Directions", False
 
-    # Conclusion
-    if any(kw in casefolded for kw in ["conclusion", "conclusions", "concluding remark", "concluding discussion"]):
+    if re.search(r"^(conclusions?|concluding\s+remarks?|closing\s+remarks?|summary\s+and\s+conclusions?)(\b|:|$)", casefolded):
         return "Conclusion", False
 
-    # Discussion
-    if "discussion" in casefolded:
+    if re.search(r"^(discussions?|results?\s+and\s+discussion|general\s+discussion)(\b|:|$)", casefolded):
         return "Discussion", False
 
-    # Results / Findings / Evaluation
-    if any(kw in casefolded for kw in ["results", "findings", "evaluation", "experimental validation", "benchmark result", "ablation study", "ablation studies"]):
-        return "Results", False
+    if is_top_level:
+        if re.search(r"^(results?|findings?|experimental\s+results?|experiments?\s+and\s+results?|performance\s+evaluation|evaluation)(\b|:|$)", casefolded):
+            return "Results", False
 
-    # Methods / Methodology / Proposed
-    if any(kw in casefolded for kw in [
-        "materials and methods", "materials & methods", "methodology", "methods", "method",
-        "proposed approach", "proposed method", "proposed framework", "proposed model",
-        "model architecture", "implementation detail", "experimental setup", "study design",
-        "data collection", "subjects and methods", "patients and methods",
-    ]):
-        return "Methods", False
+        if re.search(r"^(materials?\s+and\s+methods?|materials?\s+&\s+methods?|methodology|methodologies|methods?|experimental\s+(design|setup|methods?|procedures?)|proposed\s+(method|approach|model|framework|architecture)|model\s+architecture|implementation\s+details?)(\b|:|$)", casefolded):
+            return "Methods", False
 
-    # Introduction / Background / Related Work
-    if any(kw in casefolded for kw in ["introduction", "background", "related work", "prior work", "state of the art", "preliminaries", "problem formulation"]):
-        return "Introduction", False
+        if re.search(r"^(introductions?|background|background\s+and\s+motivation|related\s+works?|prior\s+work|preliminaries|problem\s+(formulation|statement))(\b|:|$)", casefolded):
+            return "Introduction", False
 
-    # Abstract
-    if "abstract" in casefolded:
-        return "Abstract", False
+        if re.search(r"^(abstract|executive\s+summary)(\b|:|$)", casefolded):
+            return "Abstract", False
 
     # Unmapped regular scientific content (NOT excluded from LLM)
     return None, False
 
 
-def annotate_section_tree(sections: list[dict[str, Any]]) -> None:
+def annotate_section_tree(
+    sections: list[dict[str, Any]],
+    parent_std: str | None = None,
+    parent_excl: bool = False,
+) -> None:
     """
     Recursively annotate each section node in-place with:
     - original_title: original heading title
     - standard_section: matched canonical standard section name (or None)
     - is_excluded_from_llm: boolean flag
+    Child subsections inherit parent canonical standard section if not explicitly matched.
     """
     for sec in sections:
         original = sec.get("original_title") or sec.get("title", "")
         sec["original_title"] = original
-        std_sec, is_excluded = match_standard_section(original)
+        is_top = (parent_std is None and not parent_excl)
+        std_sec, is_excluded = match_standard_section(original, is_top_level=is_top)
+
+        if std_sec is None and not is_excluded and parent_std is not None:
+            # Child inherits parent canonical section
+            std_sec = parent_std
+            is_excluded = parent_excl
+        elif is_excluded or std_sec == "References":
+            is_excluded = True
+        elif parent_excl:
+            is_excluded = True
+
         sec["standard_section"] = std_sec
         sec["is_excluded_from_llm"] = is_excluded
 
         if sec.get("children"):
-            annotate_section_tree(sec["children"])
+            annotate_section_tree(sec["children"], parent_std=std_sec, parent_excl=is_excluded)
 
 
 def extract_section_mappings_summary(document: dict[str, Any]) -> dict[str, Any]:
