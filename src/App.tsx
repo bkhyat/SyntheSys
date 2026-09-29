@@ -1234,23 +1234,6 @@ function App() {
               <div className="list-title-wrap">
                 <h2>{activeList.name}</h2>
 
-                {/* Stage Type Tag */}
-                {activeList.stageType === 'screening' && (
-                  <span className="stage-badge-pill screening-badge-pill" title={`Inclusion: ${activeList.inclusionCriteria || 'Configured'}`}>
-                    <Sparkles size={11} /> AI Screening Stage
-                  </span>
-                )}
-                {activeList.stageType === 'extraction' && (
-                  <span className="stage-badge-pill extraction-badge-pill" title={`${activeExtractionFields.length} extraction columns active`}>
-                    <Table2 size={11} /> AI Extraction ({activeExtractionFields.length} fields)
-                  </span>
-                )}
-                {activeList.stageType === 'synthesis' && (
-                  <span className="stage-badge-pill synthesis-badge-pill" title="Systematic literature review synthesis workspace">
-                    <BookOpen size={11} /> AI Synthesis Stage
-                  </span>
-                )}
-
                 {/* Stage Settings / Configure Button */}
                 <button
                   type="button"
@@ -1271,40 +1254,22 @@ function App() {
                   </div>
 
                   {screenedCount > 0 && (
-                    <div className="decision-filter-group" role="group" aria-label="Filter by AI screening decision">
-                      <span className="decision-filter-label">DECISION:</span>
-                      <button
-                        type="button"
-                        className={`decision-filter-btn ${decisionFilter === 'all' ? 'active' : ''}`}
-                        onClick={() => setDecisionFilter('all')}
-                        title="Show all decisions"
+                    <div className="decision-filter-dropdown-wrap">
+                      <label htmlFor="decision-filter-select" className="decision-filter-label">
+                        DECISION:
+                      </label>
+                      <select
+                        id="decision-filter-select"
+                        className="decision-filter-select"
+                        value={decisionFilter}
+                        onChange={(event) => setDecisionFilter(event.target.value as DecisionFilter)}
+                        aria-label="Filter by AI screening decision"
                       >
-                        All
-                      </button>
-                      <button
-                        type="button"
-                        className={`decision-filter-btn decision-btn-yes ${decisionFilter === 'Yes' ? 'active' : ''}`}
-                        onClick={() => setDecisionFilter(decisionFilter === 'Yes' ? 'all' : 'Yes')}
-                        title="Show papers classified as Yes (Include)"
-                      >
-                        <Check size={11} /> Yes ({yesCount})
-                      </button>
-                      <button
-                        type="button"
-                        className={`decision-filter-btn decision-btn-notsure ${decisionFilter === 'Not Sure' ? 'active' : ''}`}
-                        onClick={() => setDecisionFilter(decisionFilter === 'Not Sure' ? 'all' : 'Not Sure')}
-                        title="Show papers classified as Not Sure"
-                      >
-                        <CircleHelp size={11} /> Not Sure ({notSureCount})
-                      </button>
-                      <button
-                        type="button"
-                        className={`decision-filter-btn decision-btn-no ${decisionFilter === 'No' ? 'active' : ''}`}
-                        onClick={() => setDecisionFilter(decisionFilter === 'No' ? 'all' : 'No')}
-                        title="Show papers classified as No (Exclude)"
-                      >
-                        <X size={11} /> No ({noCount})
-                      </button>
+                        <option value="all">All Decisions ({screenedCount})</option>
+                        <option value="Yes">Yes ({yesCount})</option>
+                        <option value="Not Sure">Not Sure ({notSureCount})</option>
+                        <option value="No">No ({noCount})</option>
+                      </select>
                     </div>
                   )}
 
