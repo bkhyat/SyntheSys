@@ -482,6 +482,11 @@ def _apply_summaries_to_document(
     document["overall_summary"] = parsed.overall_summary
 
     summary_by_id = {item.id: item.summary for item in parsed.section_summaries if item.id and item.summary}
+    summary_by_title = {
+        re.sub(r"^(?:[0-9]+(?:\.[0-9]+)*|[a-z]|[ivxldm]+)[\.\:\-\–\s]+\s*", "", item.title.strip().casefold()): item.summary
+        for item in parsed.section_summaries if item.title and item.summary
+    }
+
     for item in flat_sections:
         sec_node = item["node"]
         title = sec_node.get("title", "")
@@ -490,8 +495,14 @@ def _apply_summaries_to_document(
             sec_node.pop("summary", None)
             continue
 
+        clean_sec_title = re.sub(r"^(?:[0-9]+(?:\.[0-9]+)*|[a-z]|[ivxldm]+)[\.\:\-\–\s]+\s*", "", title.strip().casefold())
         if item["id"] in summary_by_id:
             sec_node["summary"] = summary_by_id[item["id"]]
+        elif clean_sec_title in summary_by_title:
+            sec_node["summary"] = summary_by_title[clean_sec_title]
+        elif any(k in clean_sec_title or clean_sec_title in k for k in summary_by_title if len(k) >= 4):
+            matched_k = next(k for k in summary_by_title if len(k) >= 4 and (k in clean_sec_title or clean_sec_title in k))
+            sec_node["summary"] = summary_by_title[matched_k]
         elif not sec_node.get("summary"):
             sec_node["summary"] = f"Covers detailed analysis regarding {title}."
 

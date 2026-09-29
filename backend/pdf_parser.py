@@ -359,11 +359,30 @@ def _figure_image_bbox(
 def _build_outline(lines: list[dict[str, Any]], body_size: float) -> list[dict[str, Any]]:
     roots: list[dict[str, Any]] = []
     stack: list[dict[str, Any]] = []
+    preamble_lines: list[dict[str, Any]] = []
+
     for line in lines:
         level = _heading_level(line["text"], line["font_size"], body_size)
         reference_heading = line["text"].strip().rstrip(":").casefold() in _REFERENCE_HEADINGS
         is_numbered_reference_heading = reference_heading and _NUMBERED_HEADING.match(line["text"])
         if level is not None and not is_numbered_reference_heading:
+            if preamble_lines and not roots:
+                # Add preamble node for lines preceding the first formal section
+                preamble_node = {
+                    "title": "Title & Overview",
+                    "level": 1,
+                    "start_page": preamble_lines[0]["page_number"],
+                    "end_page": preamble_lines[-1]["page_number"],
+                    "start_line": preamble_lines[0]["line_number"],
+                    "line_refs": [
+                        {"page_number": l["page_number"], "line_number": l["line_number"]}
+                        for l in preamble_lines
+                    ],
+                    "children": [],
+                }
+                roots.append(preamble_node)
+                preamble_lines = []
+
             while stack and stack[-1]["level"] >= level:
                 stack.pop()
             node = {
@@ -382,6 +401,23 @@ def _build_outline(lines: list[dict[str, Any]], body_size: float) -> list[dict[s
             stack[-1]["line_refs"].append(reference)
             for node in stack:
                 node["end_page"] = line["page_number"]
+        else:
+            preamble_lines.append(line)
+
+    if preamble_lines and not roots:
+        roots.append({
+            "title": "Full Document",
+            "level": 1,
+            "start_page": preamble_lines[0]["page_number"],
+            "end_page": preamble_lines[-1]["page_number"],
+            "start_line": preamble_lines[0]["line_number"],
+            "line_refs": [
+                {"page_number": l["page_number"], "line_number": l["line_number"]}
+                for l in preamble_lines
+            ],
+            "children": [],
+        })
+
     return roots
 
 

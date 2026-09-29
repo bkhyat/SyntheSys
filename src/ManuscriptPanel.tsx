@@ -1,5 +1,21 @@
-import { useEffect, useState } from 'react'
-import { ChevronRight, ExternalLink, FileText, Image, LoaderCircle, Maximize2, Sparkles, Table2, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  BookOpen,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  FileText,
+  Image,
+  ListTree,
+  LoaderCircle,
+  Maximize2,
+  Search,
+  Sparkles,
+  Table2,
+  X,
+} from 'lucide-react'
 import './ManuscriptPanel.css'
 import type { ManuscriptMetadata } from './types'
 
@@ -36,16 +52,40 @@ type Props = {
   onClose: () => void
 }
 
-type Tab = 'outline' | 'extracted' | 'figures' | 'tables' | 'references' | 'pages'
+type Tab = 'sections' | 'extracted' | 'figures' | 'tables' | 'references' | 'pages'
+
+type ParagraphBlock = {
+  text: string
+  startPage: number
+  endPage: number
+  startLine: number
+  endLine: number
+}
 
 function pdfPageUrl(paperId: string, pageNumber: number) {
   return `/api/papers/${encodeURIComponent(paperId)}/manuscript.pdf#page=${pageNumber}`
 }
 
-function PageCitation({ paperId, page, line, lineEnd }: { paperId: string; page: number; line?: number; lineEnd?: number }) {
-  return <a className="document-citation" href={pdfPageUrl(paperId, page)} target="_blank" rel="noreferrer">
-    Open PDF · p. {page}{line ? ` · L${line}${lineEnd && lineEnd !== line ? `–${lineEnd}` : ''}` : ''} <ExternalLink size={11} />
-  </a>
+function PageCitation({
+  paperId,
+  page,
+  line,
+  lineEnd,
+  label,
+}: {
+  paperId: string
+  page: number
+  line?: number
+  lineEnd?: number
+  label?: string
+}) {
+  const text = label ?? `p. ${page}${line ? ` · L${line}${lineEnd && lineEnd !== line ? `–${lineEnd}` : ''}` : ''}`
+  return (
+    <a className="document-citation" href={pdfPageUrl(paperId, page)} target="_blank" rel="noreferrer" title={`Open PDF at page ${page}`}>
+      <span>{text}</span>
+      <ExternalLink size={10} />
+    </a>
+  )
 }
 
 function FigurePreview({ paperId, index, label, caption }: { paperId: string; index: number; label: string; caption: string }) {
@@ -133,65 +173,235 @@ function isUnwantedSectionSummary(title: string): boolean {
   return /^(acknowledg(e)?ments?|references?|bibliograph(y|ies)|(literature|works|citations?)\s+cited|author(s)?['’s]*\s+(contributions?|information|details|affiliations?|notes?)|credit(\s+authorship)?\s+contribution|(conflict|conflicts|competing)\s+(of\s+)?interests?|declaration(s)?\s+of\s+(competing\s+)?interests?|disclosures?|(financial\s+)?funding|(financial|grant)\s+(support|disclosure)|(data|code|software)(\s+and\s+(code|data|materials?))?\s+availability|availability\s+of\s+(data|materials?|supporting\s+data)|(ethics|ethical)(\s+approval|\s+statement|\s+considerations?)|(patient\s+|informed\s+)?consent|(institutional\s+review\s+board|irb)|(supplementary|supplemental|supporting)\s+(materials?|information|files?|data)|abbreviations?|acronyms?|glossary|nomenclature|keywords?|index\s+terms?|publisher['’]?s\s+note|disclaimer|copyright|license|about\s+the\s+authors?|biograph(y|ies))(\b|:|$)/i.test(normalized)
 }
 
-function OutlineItems({ items, paperId, linesByReference, firstOpen = false }: {
-  items: Section[]
+/**
+ * Reconstructs clean, cohesive paragraphs from sequential DocumentLines,
+ * handling hyphenation breaks and natural paragraph separation.
+ */
+function buildParagraphs(lines: DocumentLine[]): ParagraphBlock[] {
+  if (!lines.length) return []
+  const paragraphs: ParagraphBlock[] = []
+  let currentLines: DocumentLine[] = []
+
+  const flush = () => {
+    if (!currentLines.length) return
+    let text = ''
+    for (let i = 0; i < currentLines.length; i++) {
+      const lineText = currentLines[i].text.trim()
+      if (!lineText) continue
+      if (!text) {
+        text = lineText
+      } else if (text.endsWith('-') && /^[a-z]/i.test(lineText)) {
+        text = text.slice(0, -1) + lineText
+      } else {
+        text += ' ' + lineText
+      }
+    }
+    if (text.trim()) {
+      paragraphs.push({
+        text: text.trim(),
+        startPage: currentLines[0].page_number,
+        endPage: currentLines[currentLines.length - 1].page_number,
+        startLine: currentLines[0].line_number,
+        endLine: currentLines[currentLines.length - 1].line_number,
+      })
+    }
+    currentLines = []
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (currentLines.length > 0) {
+      const prevLine = currentLines[currentLines.length - 1]
+      const isPageBreak = line.page_number !== prevLine.page_number
+      const approxLineHeight = Math.max(8, prevLine.bbox.bottom - prevLine.bbox.top)
+      const verticalGap = !isPageBreak ? line.bbox.top - prevLine.bbox.bottom : 999
+      const prevEndsSentence = /[.!?:"”)]$/.test(prevLine.text.trim())
+
+      if (
+        (verticalGap > approxLineHeight * 1.35) ||
+        (isPageBreak && prevEndsSentence)
+      ) {
+        flush()
+      }
+    }
+    currentLines.push(line)
+  }
+  flush()
+  return paragraphs
+}
+
+/**
+ * Section & Subsection Card component rendering structured title, summary,
+ * and fluent extracted paragraphs with citation links.
+ */
+function SectionCard({
+  section,
+  paperId,
+  linesByReference,
+  level = 1,
+  showSummaries = true,
+  searchQuery = '',
+  expanded = true,
+  onToggleExpand,
+}: {
+  section: Section
   paperId: string
   linesByReference: Map<string, DocumentLine>
-  firstOpen?: boolean
+  level?: number
+  showSummaries?: boolean
+  searchQuery?: string
+  expanded?: boolean
+  onToggleExpand?: () => void
 }) {
-  return <ol className="outline-list">{items.map((section, index) => {
-    const bodyLines = section.line_refs.slice(1)
-      .map((reference) => linesByReference.get(`${reference.page_number}:${reference.line_number}`))
-      .filter((line): line is DocumentLine => Boolean(line))
-    const pageGroups = bodyLines.reduce<{ page: number; lines: DocumentLine[] }[]>((groups, line) => {
-      const current = groups[groups.length - 1]
-      if (current?.page === line.page_number) current.lines.push(line)
-      else groups.push({ page: line.page_number, lines: [line] })
-      return groups
-    }, [])
+  const [copied, setCopied] = useState(false)
 
-    return <li key={`${section.start_page}-${section.start_line}-${index}`}>
-      <details className="outline-node" open={firstOpen && index === 0}>
-        <summary className="outline-item">
-          <span className="outline-level">{String(section.level).padStart(2, '0')}</span>
-          <span className="outline-title">{section.title}</span>
-          <span className="outline-line-count">{bodyLines.length} lines</span>
-        </summary>
-        <div className="outline-section-body">
-          {section.summary && !isUnwantedSectionSummary(section.title) && <div className="section-summary-box">
-            <div className="section-summary-header">
-              <Sparkles size={11} className="summary-sparkle" />
-              <span>SECTION SUMMARY</span>
-            </div>
-            <p className="section-summary-text">{section.summary}</p>
-          </div>}
-          <div className="section-source-bar">
-            <PageCitation paperId={paperId} page={section.start_page} line={section.start_line} />
-          </div>
-          {pageGroups.length > 0 && <details className="section-source-details">
-            <summary>
-              <ChevronRight size={11} />
-              <span>Full extracted text ({bodyLines.length} lines)</span>
-            </summary>
-            <div className="section-paragraphs-wrap">
-              {pageGroups.map((group) => <p className="section-text-paragraph" key={`${section.start_page}-${group.page}-${group.lines[0].line_number}`}>
-                <span>{group.lines.map((line) => line.text).join(' ')}</span>
-                <PageCitation paperId={paperId} page={group.page} line={group.lines[0].line_number} lineEnd={group.lines[group.lines.length - 1].line_number} />
-              </p>)}
-            </div>
-          </details>}
-          {section.children.length > 0 && <OutlineItems items={section.children} paperId={paperId} linesByReference={linesByReference} />}
+  const bodyLines = useMemo(() => {
+    // line_refs[0] is typically the section title itself
+    const linesToProcess = section.line_refs.length > 1 ? section.line_refs.slice(1) : section.line_refs
+    return linesToProcess
+      .map((ref) => linesByReference.get(`${ref.page_number}:${ref.line_number}`))
+      .filter((l): l is DocumentLine => Boolean(l))
+  }, [section.line_refs, linesByReference])
+
+  const paragraphs = useMemo(() => buildParagraphs(bodyLines), [bodyLines])
+
+  const fullText = useMemo(() => {
+    return paragraphs.map((p) => p.text).join('\n\n')
+  }, [paragraphs])
+
+  const copySectionText = async () => {
+    try {
+      await navigator.clipboard.writeText(`${section.title}\n\n${fullText}`)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2200)
+    } catch {
+      // ignore
+    }
+  }
+
+  const pageRange = useMemo(() => {
+    if (section.start_page === section.end_page) {
+      return `p. ${section.start_page}`
+    }
+    return `pp. ${section.start_page}–${section.end_page}`
+  }, [section.start_page, section.end_page])
+
+  const matchesSearch = useMemo(() => {
+    if (!searchQuery.trim()) return true
+    const q = searchQuery.toLowerCase()
+    return (
+      section.title.toLowerCase().includes(q) ||
+      (section.summary && section.summary.toLowerCase().includes(q)) ||
+      fullText.toLowerCase().includes(q)
+    )
+  }, [searchQuery, section.title, section.summary, fullText])
+
+  if (!matchesSearch) {
+    return null
+  }
+
+  const sectionAnchorId = `section-${section.start_page}-${section.start_line}`
+  const hasSummary = Boolean(section.summary && !isUnwantedSectionSummary(section.title))
+  const levelClass = level === 1 ? 'section-card-h1' : level === 2 ? 'section-card-h2' : 'section-card-h3'
+
+  return (
+    <article id={sectionAnchorId} className={`section-card ${levelClass}`}>
+      <header className="section-card-header">
+        <div className="section-header-left">
+          {onToggleExpand && (
+            <button
+              type="button"
+              className="section-collapse-btn"
+              onClick={onToggleExpand}
+              title={expanded ? 'Collapse section' : 'Expand section'}
+            >
+              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+          )}
+          <span className="section-level-badge">
+            {level === 1 ? 'Section' : 'Subsection'} {String(section.level)}
+          </span>
+          <h3 className="section-card-title">{section.title}</h3>
         </div>
-      </details>
-    </li>
-  })}</ol>
+
+        <div className="section-header-right">
+          <span className="section-meta-pill" title="Pages in PDF">{pageRange}</span>
+          <span className="section-meta-pill" title="Extracted line count">{bodyLines.length} lines</span>
+          <button
+            type="button"
+            className="section-action-btn"
+            onClick={() => void copySectionText()}
+            title="Copy section text"
+          >
+            {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+          </button>
+          <PageCitation paperId={paperId} page={section.start_page} line={section.start_line} label="PDF" />
+        </div>
+      </header>
+
+      {expanded && (
+        <div className="section-card-body">
+          {showSummaries && hasSummary && (
+            <div className="section-summary-box">
+              <div className="section-summary-header">
+                <Sparkles size={11} className="summary-sparkle" />
+                <span>AI SECTION SUMMARY</span>
+              </div>
+              <p className="section-summary-text">{section.summary}</p>
+            </div>
+          )}
+
+          {paragraphs.length > 0 ? (
+            <div className="section-paragraphs-stream">
+              {paragraphs.map((para, pIdx) => (
+                <div key={pIdx} className="section-paragraph-row">
+                  <p className="section-paragraph-text">{para.text}</p>
+                  <div className="paragraph-citation-wrap">
+                    <PageCitation
+                      paperId={paperId}
+                      page={para.startPage}
+                      line={para.startLine}
+                      lineEnd={para.endLine}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="section-empty-hint">No body text lines extracted under this heading.</p>
+          )}
+
+          {/* Render Child Subsections */}
+          {section.children.length > 0 && (
+            <div className="section-subsections-container">
+              {section.children.map((child, childIdx) => (
+                <SectionCard
+                  key={`${child.start_page}-${child.start_line}-${childIdx}`}
+                  section={child}
+                  paperId={paperId}
+                  linesByReference={linesByReference}
+                  level={level + 1}
+                  showSummaries={showSummaries}
+                  searchQuery={searchQuery}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </article>
+  )
 }
 
 export default function ManuscriptPanel({ paper, onClose }: Props) {
   const [document, setDocument] = useState<ManuscriptDocument | null>(null)
-  const [tab, setTab] = useState<Tab>('outline')
+  const [tab, setTab] = useState<Tab>('sections')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [showSummaries, setShowSummaries] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
+  const [rawLineMode, setRawLineMode] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -211,136 +421,427 @@ export default function ManuscriptPanel({ paper, onClose }: Props) {
     return () => controller.abort()
   }, [paper.id])
 
+  const linesByReference = useMemo(() => {
+    if (!document) return new Map<string, DocumentLine>()
+    const map = new Map<string, DocumentLine>()
+    for (const page of document.pages) {
+      for (const line of page.lines) {
+        map.set(`${page.page_number}:${line.line_number}`, line)
+      }
+    }
+    return map
+  }, [document])
+
   const extractedEntries = Object.entries(paper.extractedData ?? {})
   const hasExtracted = extractedEntries.length > 0
 
   const tabs: { id: Tab; label: string; count?: number; icon: typeof FileText }[] = [
-    { id: 'outline', label: 'Outline & Summaries', icon: FileText },
+    { id: 'sections', label: 'Sections & Text', count: document?.sections.length, icon: BookOpen },
     ...(hasExtracted ? [{ id: 'extracted' as const, label: 'Extracted Fields', count: extractedEntries.length, icon: Sparkles }] : []),
     { id: 'figures', label: 'Figures', count: document?.figures.length, icon: Image },
     { id: 'tables', label: 'Tables', count: document?.tables.length, icon: Table2 },
     { id: 'references', label: 'References', count: document?.references.length, icon: FileText },
-    { id: 'pages', label: 'Page text', icon: FileText },
+    { id: 'pages', label: 'Page text', count: document?.pages.length, icon: FileText },
   ]
 
-  return <div className="manuscript-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <section className="manuscript-panel" aria-label="Parsed manuscript">
-      <header className="manuscript-header">
-        <div className="manuscript-heading-copy">
-          <div className="manuscript-eyebrow">ATTACHED MANUSCRIPT</div>
-          <h2>{paper.title}</h2>
-          <p>{paper.manuscript.fileName} · {paper.manuscript.pageCount} pages · {paper.manuscript.lineCount.toLocaleString()} extracted lines</p>
-        </div>
-        <div className="manuscript-header-actions">
-          <a className="manuscript-pdf-link" href={pdfPageUrl(paper.id, 1)} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open PDF</a>
-          <button className="icon-button" type="button" onClick={onClose} title="Close manuscript"><X size={17} /></button>
-        </div>
-      </header>
+  const toggleAllSections = (expand: boolean) => {
+    if (!document) return
+    const next: Record<string, boolean> = {}
+    const traverse = (secs: Section[]) => {
+      for (const s of secs) {
+        const key = `${s.start_page}-${s.start_line}`
+        next[key] = expand
+        if (s.children) traverse(s.children)
+      }
+    }
+    traverse(document.sections)
+    setExpandedSections(next)
+  }
 
-      <nav className="manuscript-tabs" role="tablist" aria-label="Manuscript sections">
-        {tabs.map(({ id, label, count, icon: Icon }) => <button key={id} role="tab" aria-selected={tab === id} className={`manuscript-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
-          <Icon size={14} /><span>{label}</span>{count !== undefined && <span className="manuscript-tab-count">{count}</span>}
-        </button>)}
-      </nav>
+  const toggleSection = (key: string) => {
+    setExpandedSections((prev) => ({
+      ...prev,
+      [key]: prev[key] === undefined ? false : !prev[key],
+    }))
+  }
 
-      <main className="manuscript-content">
-        {loading && <div className="manuscript-loading"><LoaderCircle size={18} className="spin" /> Loading extracted manuscript…</div>}
-        {!loading && error && <div className="manuscript-message manuscript-error">{error}</div>}
-        {!loading && document && <>
-          {document.warnings.map((warning) => <div className="manuscript-message manuscript-warning" key={warning}>{warning}</div>)}
-          {tab === 'outline' && <section className="document-section">
-            {document.overall_summary && <div className="manuscript-overall-summary">
-              <div className="overall-summary-badge">
-                <Sparkles size={13} />
-                <span>OVERALL MANUSCRIPT SUMMARY</span>
-              </div>
-              <p className="overall-summary-content">{document.overall_summary}</p>
-            </div>}
-            <div className="document-section-heading"><span>SECTIONS &amp; SUMMARIES</span><span>{document.sections.length} top-level sections</span></div>
-            {document.sections.length ? <OutlineItems items={document.sections} paperId={paper.id} linesByReference={new Map(document.pages.flatMap((page) => page.lines.map((line) => [`${page.page_number}:${line.line_number}`, line] as const)))} firstOpen /> : <p className="document-empty">No headings were detected in this PDF.</p>}
-          </section>}
-          {tab === 'extracted' && <section className="document-section">
-            <div className="document-section-heading"><span>STRUCTURED DATA EXTRACTIONS</span><span>{extractedEntries.length} fields</span></div>
-            {extractedEntries.length ? (
-              <div className="extracted-fields-grid">
-                {extractedEntries.map(([name, raw]) => {
-                  const val = typeof raw === 'string' ? raw : (raw?.value || 'Not reported')
-                  return (
-                    <article key={name} className="extracted-detail-card">
-                      <header className="extracted-detail-header">
-                        <div className="extracted-detail-title-badge">
-                          <Sparkles size={12} />
-                          <span>{name}</span>
-                        </div>
-                      </header>
-                      <div className="extracted-detail-value-box">
-                        <span className="extracted-detail-label">Extracted Value</span>
-                        <div className="extracted-detail-val">{val}</div>
+  const jumpToSection = (startPage: number, startLine: number) => {
+    const el = window.document.getElementById(`section-${startPage}-${startLine}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      el.classList.add('section-highlight')
+      setTimeout(() => el.classList.remove('section-highlight'), 1800)
+    }
+  }
+
+  return (
+    <div className="manuscript-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section className="manuscript-panel" aria-label="Parsed manuscript">
+        <header className="manuscript-header">
+          <div className="manuscript-heading-copy">
+            <div className="manuscript-eyebrow">ATTACHED MANUSCRIPT</div>
+            <h2>{paper.title}</h2>
+            <p>{paper.manuscript.fileName} · {paper.manuscript.pageCount} pages · {paper.manuscript.lineCount.toLocaleString()} extracted lines</p>
+          </div>
+          <div className="manuscript-header-actions">
+            <a className="manuscript-pdf-link" href={pdfPageUrl(paper.id, 1)} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} /> Open PDF
+            </a>
+            <button className="icon-button" type="button" onClick={onClose} title="Close manuscript">
+              <X size={17} />
+            </button>
+          </div>
+        </header>
+
+        <nav className="manuscript-tabs" role="tablist" aria-label="Manuscript sections">
+          {tabs.map(({ id, label, count, icon: Icon }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              className={`manuscript-tab ${tab === id ? 'active' : ''}`}
+              onClick={() => setTab(id)}
+            >
+              <Icon size={14} />
+              <span>{label}</span>
+              {count !== undefined && <span className="manuscript-tab-count">{count}</span>}
+            </button>
+          ))}
+        </nav>
+
+        <main className="manuscript-content">
+          {loading && (
+            <div className="manuscript-loading">
+              <LoaderCircle size={18} className="spin" /> Loading extracted manuscript…
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className="manuscript-message manuscript-error">{error}</div>
+          )}
+
+          {!loading && document && (
+            <>
+              {document.warnings.map((warning) => (
+                <div className="manuscript-message manuscript-warning" key={warning}>{warning}</div>
+              ))}
+
+              {/* SECTION BY SECTION FULL TEXT VIEW */}
+              {tab === 'sections' && (
+                <section className="document-section sections-view-container">
+                  {document.overall_summary && (
+                    <div className="manuscript-overall-summary">
+                      <div className="overall-summary-badge">
+                        <Sparkles size={13} />
+                        <span>OVERALL MANUSCRIPT SYNTHESIS</span>
                       </div>
-                    </article>
-                  )
-                })}
-              </div>
-            ) : (
-              <p className="document-empty">No extracted fields available for this paper yet.</p>
-            )}
-          </section>}
-          {tab === 'figures' && <section className="document-section">
-            <div className="document-section-heading"><span>FIGURE CAPTIONS</span><span>{document.figures.length} found</span></div>
-            {document.figures.length ? document.figures.map((figure, index) => <article className="figure-entry" key={`${figure.page_number}-${index}`}>
-              <div className="figure-entry-icon"><Image size={16} /></div><div className="figure-entry-copy"><strong>{figure.label}</strong><p>{figure.caption}</p><FigurePreview paperId={paper.id} index={index} label={figure.label} caption={figure.caption} /><PageCitation paperId={paper.id} page={figure.page_number} line={figure.line_refs[0]?.line_number} /></div>
-            </article>) : <p className="document-empty">No figure captions were detected.</p>}
-          </section>}
-          {tab === 'tables' && <section className="document-section">
-            <div className="document-section-heading"><span>EXTRACTED TABLES</span><span>{document.tables.length} found</span></div>
-            {document.tables.length ? document.tables.map((table, index) => {
-              const headerRow = table.cells[0] ?? []
-              const bodyRows = table.cells.slice(1)
-              return <article className="table-entry" key={`${table.page_number}-${index}`}>
-                <header className="table-entry-header">
-                  <div className="table-header-info">
-                    <div className="table-title-row">
-                      <span className="table-label-badge"><Table2 size={13} /> {table.label}</span>
-                      <span className="table-dim-badge">{table.cells.length} rows × {headerRow.length} cols</span>
+                      <p className="overall-summary-content">{document.overall_summary}</p>
                     </div>
-                    {table.caption && <p className="table-caption">{table.caption}</p>}
+                  )}
+
+                  {/* Section Controls Toolbar */}
+                  <div className="sections-toolbar">
+                    <div className="sections-search-box">
+                      <Search size={13} className="search-icon" />
+                      <input
+                        type="text"
+                        placeholder="Search sections or text…"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="sections-search-input"
+                      />
+                      {searchQuery && (
+                        <button type="button" className="search-clear-btn" onClick={() => setSearchQuery('')}>
+                          <X size={11} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="sections-toolbar-actions">
+                      <button
+                        type="button"
+                        className={`toolbar-toggle-btn ${showSummaries ? 'active' : ''}`}
+                        onClick={() => setShowSummaries(!showSummaries)}
+                        title="Toggle AI Section Summaries"
+                      >
+                        <Sparkles size={12} /> Summaries
+                      </button>
+                      <button
+                        type="button"
+                        className="toolbar-btn"
+                        onClick={() => toggleAllSections(true)}
+                        title="Expand all sections"
+                      >
+                        Expand all
+                      </button>
+                      <button
+                        type="button"
+                        className="toolbar-btn"
+                        onClick={() => toggleAllSections(false)}
+                        title="Collapse all sections"
+                      >
+                        Collapse all
+                      </button>
+                    </div>
                   </div>
-                  <div className="table-header-citation">
-                    <PageCitation paperId={paper.id} page={table.page_number} line={table.line_refs[0]?.line_number} />
+
+                  {/* Quick Jump Index Pills */}
+                  {document.sections.length > 0 && !searchQuery && (
+                    <div className="section-jump-bar" aria-label="Quick section navigation">
+                      <span className="jump-bar-label"><ListTree size={12} /> JUMP TO:</span>
+                      <div className="jump-bar-pills">
+                        {document.sections.map((sec, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            className="jump-pill"
+                            onClick={() => jumpToSection(sec.start_page, sec.start_line)}
+                          >
+                            {sec.title}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="document-section-heading">
+                    <span>EXTRACTED SECTIONS &amp; SUBSECTIONS</span>
+                    <span>{document.sections.length} top-level sections</span>
                   </div>
-                </header>
-                <div className="extracted-table-scroll">
-                  <table className="extracted-table">
-                    <thead>
-                      <tr>
-                        {headerRow.map((cell, cellIndex) => <th key={cellIndex}>{cell || '—'}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bodyRows.map((row, rowIndex) => <tr key={rowIndex}>
-                        {row.map((cell, cellIndex) => <td key={cellIndex}>{cell || '—'}</td>)}
-                      </tr>)}
-                    </tbody>
-                  </table>
-                </div>
-              </article>
-            }) : <p className="document-empty">No tables were detected on this manuscript.</p>}
-          </section>}
-          {tab === 'references' && <section className="document-section">
-            <div className="document-section-heading"><span>REFERENCE LIST</span><span>{document.references.length} found</span></div>
-            {document.references.length ? <ol className="reference-list">{document.references.map((reference, index) => <li key={`${reference.page_number}-${index}`}>
-              <span className="reference-number">{reference.label || String(index + 1).padStart(2, '0')}</span><p>{reference.text}</p><PageCitation paperId={paper.id} page={reference.page_number} line={reference.line_refs[0]?.line_number} />
-            </li>)}</ol> : <p className="document-empty">No references were detected. The PDF may use a different heading or citation style.</p>}
-          </section>}
-          {tab === 'pages' && <section className="document-section page-text-section">
-            <div className="document-section-heading"><span>PAGE-ORDERED TEXT</span><span>Page and line numbers are local to the PDF</span></div>
-            {document.pages.map((page) => <details className="page-text-entry" key={page.page_number} open={page.page_number === 1}>
-              <summary>Page {page.page_number}<span>{page.lines.length} lines</span><PageCitation paperId={paper.id} page={page.page_number} /></summary>
-              <ol>{page.lines.map((line) => <li key={line.line_number}><span className="page-line-number">L{line.line_number}</span><span>{line.text}</span><span className="page-line-position">x {Math.round(line.bbox.x0)} · y {Math.round(line.bbox.top)}</span></li>)}</ol>
-            </details>)}
-          </section>}
-        </>}
-      </main>
-    </section>
-  </div>
+
+                  {document.sections.length ? (
+                    <div className="sections-flow-list">
+                      {document.sections.map((section, index) => {
+                        const key = `${section.start_page}-${section.start_line}`
+                        const isExpanded = expandedSections[key] !== false
+                        return (
+                          <SectionCard
+                            key={`${key}-${index}`}
+                            section={section}
+                            paperId={paper.id}
+                            linesByReference={linesByReference}
+                            level={1}
+                            showSummaries={showSummaries}
+                            searchQuery={searchQuery}
+                            expanded={isExpanded}
+                            onToggleExpand={() => toggleSection(key)}
+                          />
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="document-empty">No section headings detected in this PDF.</p>
+                  )}
+                </section>
+              )}
+
+              {/* STRUCTURED DATA EXTRACTIONS */}
+              {tab === 'extracted' && (
+                <section className="document-section">
+                  <div className="document-section-heading">
+                    <span>STRUCTURED DATA EXTRACTIONS</span>
+                    <span>{extractedEntries.length} fields</span>
+                  </div>
+                  {extractedEntries.length ? (
+                    <div className="extracted-fields-grid">
+                      {extractedEntries.map(([name, raw]) => {
+                        const val = typeof raw === 'string' ? raw : (raw?.value || 'Not reported')
+                        return (
+                          <article key={name} className="extracted-detail-card">
+                            <header className="extracted-detail-header">
+                              <div className="extracted-detail-title-badge">
+                                <Sparkles size={12} />
+                                <span>{name}</span>
+                              </div>
+                            </header>
+                            <div className="extracted-detail-value-box">
+                              <span className="extracted-detail-label">Extracted Value</span>
+                              <div className="extracted-detail-val">{val}</div>
+                            </div>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="document-empty">No extracted fields available for this paper yet.</p>
+                  )}
+                </section>
+              )}
+
+              {/* FIGURES */}
+              {tab === 'figures' && (
+                <section className="document-section">
+                  <div className="document-section-heading">
+                    <span>FIGURE CAPTIONS &amp; PREVIEWS</span>
+                    <span>{document.figures.length} found</span>
+                  </div>
+                  {document.figures.length ? (
+                    document.figures.map((figure, index) => (
+                      <article className="figure-entry" key={`${figure.page_number}-${index}`}>
+                        <div className="figure-entry-icon"><Image size={16} /></div>
+                        <div className="figure-entry-copy">
+                          <strong>{figure.label}</strong>
+                          <p>{figure.caption}</p>
+                          <FigurePreview paperId={paper.id} index={index} label={figure.label} caption={figure.caption} />
+                          <PageCitation paperId={paper.id} page={figure.page_number} line={figure.line_refs[0]?.line_number} />
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="document-empty">No figure captions were detected.</p>
+                  )}
+                </section>
+              )}
+
+              {/* TABLES */}
+              {tab === 'tables' && (
+                <section className="document-section">
+                  <div className="document-section-heading">
+                    <span>EXTRACTED 2D TABLES</span>
+                    <span>{document.tables.length} found</span>
+                  </div>
+                  {document.tables.length ? (
+                    document.tables.map((table, index) => {
+                      const headerRow = table.cells[0] ?? []
+                      const bodyRows = table.cells.slice(1)
+                      return (
+                        <article className="table-entry" key={`${table.page_number}-${index}`}>
+                          <header className="table-entry-header">
+                            <div className="table-header-info">
+                              <div className="table-title-row">
+                                <span className="table-label-badge"><Table2 size={13} /> {table.label}</span>
+                                <span className="table-dim-badge">{table.cells.length} rows × {headerRow.length} cols</span>
+                              </div>
+                              {table.caption && <p className="table-caption">{table.caption}</p>}
+                            </div>
+                            <div className="table-header-citation">
+                              <PageCitation paperId={paper.id} page={table.page_number} line={table.line_refs[0]?.line_number} />
+                            </div>
+                          </header>
+                          <div className="extracted-table-scroll">
+                            <table className="extracted-table">
+                              <thead>
+                                <tr>
+                                  {headerRow.map((cell, cellIndex) => (
+                                    <th key={cellIndex}>{cell || '—'}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {bodyRows.map((row, rowIndex) => (
+                                  <tr key={rowIndex}>
+                                    {row.map((cell, cellIndex) => (
+                                      <td key={cellIndex}>{cell || '—'}</td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </article>
+                      )
+                    })
+                  ) : (
+                    <p className="document-empty">No tables were detected on this manuscript.</p>
+                  )}
+                </section>
+              )}
+
+              {/* REFERENCES */}
+              {tab === 'references' && (
+                <section className="document-section">
+                  <div className="document-section-heading">
+                    <span>REFERENCE LIST</span>
+                    <span>{document.references.length} found</span>
+                  </div>
+                  {document.references.length ? (
+                    <ol className="reference-list">
+                      {document.references.map((reference, index) => (
+                        <li key={`${reference.page_number}-${index}`}>
+                          <span className="reference-number">{reference.label || String(index + 1).padStart(2, '0')}</span>
+                          <p>{reference.text}</p>
+                          <PageCitation paperId={paper.id} page={reference.page_number} line={reference.line_refs[0]?.line_number} />
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="document-empty">No references were detected.</p>
+                  )}
+                </section>
+              )}
+
+              {/* PAGE-ORDERED PARAGRAPHS & TEXT */}
+              {tab === 'pages' && (
+                <section className="document-section page-text-section">
+                  <div className="document-section-heading">
+                    <span>PAGE-ORDERED TEXT</span>
+                    <div className="page-view-mode-toggle">
+                      <button
+                        type="button"
+                        className={`mode-btn ${!rawLineMode ? 'active' : ''}`}
+                        onClick={() => setRawLineMode(false)}
+                      >
+                        Readable Paragraphs
+                      </button>
+                      <button
+                        type="button"
+                        className={`mode-btn ${rawLineMode ? 'active' : ''}`}
+                        onClick={() => setRawLineMode(true)}
+                      >
+                        Raw Line Diagnostics
+                      </button>
+                    </div>
+                  </div>
+
+                  {document.pages.map((page) => {
+                    const pageParagraphs = buildParagraphs(page.lines)
+                    return (
+                      <details className="page-text-entry" key={page.page_number} open={page.page_number === 1}>
+                        <summary>
+                          <span>Page {page.page_number}</span>
+                          <span className="page-summary-count">{page.lines.length} lines · {pageParagraphs.length} paragraphs</span>
+                          <PageCitation paperId={paper.id} page={page.page_number} />
+                        </summary>
+                        <div className="page-card-body">
+                          {!rawLineMode ? (
+                            <div className="page-paragraphs-list">
+                              {pageParagraphs.map((para, pIdx) => (
+                                <div key={pIdx} className="page-paragraph-item">
+                                  <p>{para.text}</p>
+                                  <div className="page-paragraph-footer">
+                                    <PageCitation
+                                      paperId={paper.id}
+                                      page={para.startPage}
+                                      line={para.startLine}
+                                      lineEnd={para.endLine}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <ol className="raw-lines-list">
+                              {page.lines.map((line) => (
+                                <li key={line.line_number}>
+                                  <span className="page-line-number">L{line.line_number}</span>
+                                  <span className="page-line-text">{line.text}</span>
+                                  <span className="page-line-position">
+                                    x {Math.round(line.bbox.x0)} · y {Math.round(line.bbox.top)}
+                                  </span>
+                                </li>
+                              ))}
+                            </ol>
+                          )}
+                        </div>
+                      </details>
+                    )
+                  })}
+                </section>
+              )}
+            </>
+          )}
+        </main>
+      </section>
+    </div>
+  )
 }
