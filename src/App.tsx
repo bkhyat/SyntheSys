@@ -13,6 +13,7 @@ export type VisibilityFilter = 'included' | 'hidden' | 'all'
 export type StageType = 'standard' | 'screening' | 'extraction' | 'synthesis'
 export type ScreeningDecision = 'Yes' | 'No' | 'Not Sure'
 export type DecisionFilter = 'all' | 'Yes' | 'Not Sure' | 'No' | 'unscreened'
+export type AbstractFilter = 'all' | 'has_abstract' | 'missing_abstract'
 
 export type ExtractionField = {
   id: string
@@ -243,12 +244,14 @@ function App() {
   }, [toast])
 
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>('all')
+  const [abstractFilter, setAbstractFilter] = useState<AbstractFilter>('all')
 
   useEffect(() => {
     setSelectedIds(new Set())
     setSearch('')
     setVisibilityFilter('included')
     setDecisionFilter('all')
+    setAbstractFilter('all')
   }, [activeListId])
 
   // Master paper lookup map from Stage 1 (the default stage for the library)
@@ -305,9 +308,16 @@ function App() {
           if (dec !== decisionFilter) return false
         }
       }
+
+      if (abstractFilter === 'has_abstract') {
+        if (!paper.abstract || !paper.abstract.trim()) return false
+      } else if (abstractFilter === 'missing_abstract') {
+        if (paper.abstract && paper.abstract.trim()) return false
+      }
+
       return true
     })
-  }, [activeList, resolvedActiveListPapers, search, visibilityFilter, decisionFilter])
+  }, [activeList, resolvedActiveListPapers, search, visibilityFilter, decisionFilter, abstractFilter])
 
   const includedCount = useMemo(() => {
     if (!activeList) return 0
@@ -343,6 +353,14 @@ function App() {
 
   const screenedCount = useMemo(() => {
     return resolvedActiveListPapers.filter((paper) => (paper.include ?? paper.decision) !== undefined || paper.score !== undefined).length
+  }, [resolvedActiveListPapers])
+
+  const hasAbstractCount = useMemo(() => {
+    return resolvedActiveListPapers.filter((p) => Boolean(p.abstract && p.abstract.trim())).length
+  }, [resolvedActiveListPapers])
+
+  const missingAbstractCount = useMemo(() => {
+    return resolvedActiveListPapers.filter((p) => !p.abstract || !p.abstract.trim()).length
   }, [resolvedActiveListPapers])
 
   // Destination Stage in copy dialog
@@ -1303,6 +1321,25 @@ function App() {
                     </div>
                   )}
 
+                  {resolvedActiveListPapers.length > 0 && (
+                    <div className="abstract-filter-dropdown-wrap">
+                      <label htmlFor="abstract-filter-select" className="abstract-filter-label">
+                        ABSTRACT:
+                      </label>
+                      <select
+                        id="abstract-filter-select"
+                        className="abstract-filter-select"
+                        value={abstractFilter}
+                        onChange={(event) => setAbstractFilter(event.target.value as AbstractFilter)}
+                        aria-label="Filter by abstract availability"
+                      >
+                        <option value="all">All ({resolvedActiveListPapers.length})</option>
+                        <option value="has_abstract">Has Abstract ({hasAbstractCount})</option>
+                        <option value="missing_abstract">Missing Abstract ({missingAbstractCount})</option>
+                      </select>
+                    </div>
+                  )}
+
                   <label className="search-box"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search papers" aria-label="Search papers" /><kbd>/</kbd></label>
                 </div>
               )}
@@ -1374,7 +1411,7 @@ function App() {
                               <td className="paper-cell">
                                 <a className="paper-title" href={paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : undefined)} target="_blank" rel="noreferrer" onClick={(event) => { if (!paper.url && !paper.doi) event.preventDefault() }}>{paper.title}</a>
                                 <span className="paper-authors">{paper.authors || 'Author not listed'}{paper.doi && <span className="doi-label">DOI {paper.doi}</span>}{paper.manualVisibility === 'show' && <span className="manual-vis-badge show-badge"><Eye size={10} /> Force Shown</span>}{paper.manualVisibility === 'hide' && <span className="manual-vis-badge hide-badge"><EyeOff size={10} /> Manually Hidden</span>}</span>
-                                {paper.abstract && (
+                                {paper.abstract && paper.abstract.trim() ? (
                                   <details className="abstract-details">
                                     <summary>Abstract</summary>
                                     <p>{paper.abstract}</p>
@@ -1388,6 +1425,19 @@ function App() {
                                       </div>
                                     )}
                                   </details>
+                                ) : (
+                                  <div className="paper-no-abstract-wrap">
+                                    <span className="missing-abstract-pill">No abstract</span>
+                                    {expl && (
+                                      <div className="paper-inline-explanation">
+                                        <div className="inline-explanation-header">
+                                          <Sparkles size={11} />
+                                          <span>AI SCREENING EXPLANATION ({dec ? dec.toUpperCase() : 'EVALUATION'})</span>
+                                        </div>
+                                        <p className="inline-explanation-text">{expl}</p>
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
                               </td>
                               <td className="year-cell">{paper.year || '—'}</td>
@@ -1456,7 +1506,7 @@ function App() {
                       <p>{activeList.papers.length ? 'Adjust your visibility or decision filters to see more papers.' : 'Upload a CSV or Excel file, or copy papers from an earlier stage.'}</p>
                     </div>
                     {activeList.papers.length ? (
-                      <button className="button button-secondary" onClick={() => { setVisibilityFilter('all'); setDecisionFilter('all'); setSearch('') }}>Reset filters</button>
+                      <button className="button button-secondary" onClick={() => { setVisibilityFilter('all'); setDecisionFilter('all'); setAbstractFilter('all'); setSearch('') }}>Reset filters</button>
                     ) : (
                       <button className="button button-secondary" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Choose file</button>
                     )}
