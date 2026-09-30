@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownToLine, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, ClipboardList, Eye, EyeOff, FileSpreadsheet, FileText, FolderPlus, ListFilter, LoaderCircle, Plus, Search, SlidersHorizontal, Sparkles, Table2, Trash2, Upload, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, ClipboardList, Eye, EyeOff, FileSpreadsheet, FileText, FolderPlus, ListFilter, LoaderCircle, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Table2, Trash2, Upload, User, X } from 'lucide-react'
 import Papa from 'papaparse'
 import readXlsxFile from 'read-excel-file/browser'
 import writeXlsxFile from 'write-excel-file/browser'
@@ -14,6 +14,7 @@ export type StageType = 'standard' | 'screening' | 'extraction' | 'synthesis'
 export type ScreeningDecision = 'Yes' | 'No' | 'Not Sure'
 export type DecisionFilter = 'all' | 'Yes' | 'Not Sure' | 'No' | 'unscreened'
 export type AbstractFilter = 'all' | 'has_abstract' | 'missing_abstract'
+export type DecisionSource = 'ai' | 'manual'
 
 export type ExtractionField = {
   id: string
@@ -31,6 +32,11 @@ export type Paper = {
   manualVisibility?: ManualVisibility
   extractedData?: Record<string, string>
   manuscript?: ManuscriptMetadata
+  aiDecision?: ScreeningDecision
+  aiExplanation?: string
+  manualDecision?: ScreeningDecision
+  manualExplanation?: string
+  decisionSource?: DecisionSource
 }
 export type PaperRef = {
   id: string
@@ -38,6 +44,11 @@ export type PaperRef = {
   score?: number; rationale?: string
   manualVisibility?: ManualVisibility
   extractedData?: Record<string, string>
+  aiDecision?: ScreeningDecision
+  aiExplanation?: string
+  manualDecision?: ScreeningDecision
+  manualExplanation?: string
+  decisionSource?: DecisionSource
 }
 export type PaperList = {
   id: string
@@ -246,12 +257,17 @@ function App() {
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>('all')
   const [abstractFilter, setAbstractFilter] = useState<AbstractFilter>('all')
 
+  const [overrideTargetPaper, setOverrideTargetPaper] = useState<Paper | null>(null)
+  const [overrideDecision, setOverrideDecision] = useState<ScreeningDecision | 'unscreened'>('Yes')
+  const [overrideComment, setOverrideComment] = useState('')
+
   useEffect(() => {
     setSelectedIds(new Set())
     setSearch('')
     setVisibilityFilter('included')
     setDecisionFilter('all')
     setAbstractFilter('all')
+    setOverrideTargetPaper(null)
   }, [activeListId])
 
   // Master paper lookup map from Stage 1 (the default stage for the library)
@@ -270,20 +286,56 @@ function App() {
     if (!activeList || !activeProject) return []
     const isMaster = activeProject.lists[0]?.id === activeList.id
     if (isMaster) {
-      return activeList.papers as Paper[]
+      return (activeList.papers as Paper[]).map((p) => {
+        const manualDecision = p.manualDecision
+        const manualExplanation = p.manualExplanation
+        const aiDecision = p.aiDecision
+        const aiExplanation = p.aiExplanation
+        const effectiveDecision = p.include ?? p.decision
+        const effectiveExplanation = p.explanation ?? p.rationale
+        const decisionSource: DecisionSource | undefined =
+          p.decisionSource ?? (manualDecision ? 'manual' : (aiDecision || effectiveDecision) ? 'ai' : undefined)
+        return {
+          ...p,
+          include: effectiveDecision,
+          decision: effectiveDecision,
+          explanation: effectiveExplanation,
+          aiDecision: aiDecision ?? (decisionSource === 'ai' ? effectiveDecision : undefined),
+          aiExplanation: aiExplanation ?? (decisionSource === 'ai' ? effectiveExplanation : undefined),
+          manualDecision,
+          manualExplanation,
+          decisionSource,
+        }
+      })
     }
     return activeList.papers.map((entry) => {
       const master = masterPapersMap.get(entry.id)
       if (master) {
+        const manualDecision = entry.manualDecision !== undefined ? entry.manualDecision : master.manualDecision
+        const manualExplanation = entry.manualExplanation !== undefined ? entry.manualExplanation : master.manualExplanation
+        const aiDecision = entry.aiDecision !== undefined ? entry.aiDecision : master.aiDecision
+        const aiExplanation = entry.aiExplanation !== undefined ? entry.aiExplanation : master.aiExplanation
+
+        const effectiveDecision = entry.include ?? entry.decision ?? master.include ?? master.decision
+        const effectiveExplanation = entry.explanation ?? entry.rationale ?? master.explanation ?? master.rationale
+
+        const decisionSource: DecisionSource | undefined =
+          entry.decisionSource ?? master.decisionSource ?? (manualDecision ? 'manual' : (aiDecision || effectiveDecision) ? 'ai' : undefined)
+
         return {
           ...master,
-          include: entry.include ?? entry.decision ?? master.include ?? master.decision,
-          decision: entry.include ?? entry.decision ?? master.include ?? master.decision,
-          explanation: entry.explanation ?? entry.rationale ?? master.explanation ?? master.rationale,
+          include: effectiveDecision,
+          decision: effectiveDecision,
+          explanation: effectiveExplanation,
           score: entry.score ?? master.score,
-          rationale: entry.rationale ?? master.rationale,
+          rationale: effectiveExplanation,
           manualVisibility: entry.manualVisibility,
           extractedData: entry.extractedData ?? master.extractedData,
+          aiDecision: aiDecision ?? (decisionSource === 'ai' ? effectiveDecision : undefined),
+          aiExplanation: aiExplanation ?? (decisionSource === 'ai' ? effectiveExplanation : undefined),
+          manualDecision,
+          manualExplanation,
+          decisionSource,
         }
       }
       return entry as Paper
@@ -385,6 +437,100 @@ function App() {
 
   function updateProject(projectId: string, update: (project: Project) => Project) {
     setProjects((current) => current.map((project) => project.id === projectId ? update(project) : project))
+  }
+
+  function openDecisionOverride(paper: Paper) {
+    const activeDec = paper.include || paper.decision || (paper.score !== undefined ? (paper.score >= 8 ? 'Yes' : paper.score >= 5 ? 'Not Sure' : 'No') : undefined)
+    setOverrideTargetPaper(paper)
+    setOverrideDecision(activeDec ?? 'Yes')
+    setOverrideComment(paper.manualExplanation ?? (paper.decisionSource === 'manual' ? (paper.explanation || '') : ''))
+  }
+
+  function saveDecisionOverride(paperId: string, newDecision: ScreeningDecision | 'unscreened', newComment: string, revertToAi = false) {
+    if (!activeProject || !activeList) return
+    const currentPaper = resolvedActiveListPapers.find((p) => p.id === paperId)
+    if (!currentPaper) return
+
+    const aiDec = currentPaper.aiDecision ?? (!currentPaper.manualDecision ? (currentPaper.include ?? currentPaper.decision) : undefined)
+    const aiExpl = currentPaper.aiExplanation ?? (!currentPaper.manualDecision ? (currentPaper.explanation ?? currentPaper.rationale) : undefined)
+
+    let finalDecision: ScreeningDecision | undefined
+    let finalExplanation: string | undefined
+    let manualDecision: ScreeningDecision | undefined
+    let manualExplanation: string | undefined
+    let decisionSource: DecisionSource | undefined
+
+    if (revertToAi) {
+      finalDecision = aiDec
+      finalExplanation = aiExpl
+      manualDecision = undefined
+      manualExplanation = undefined
+      decisionSource = aiDec ? 'ai' : undefined
+    } else if (newDecision === 'unscreened') {
+      finalDecision = undefined
+      finalExplanation = newComment.trim() || undefined
+      manualDecision = undefined
+      manualExplanation = newComment.trim() || undefined
+      decisionSource = newComment.trim() ? 'manual' : undefined
+    } else {
+      finalDecision = newDecision
+      finalExplanation = newComment.trim()
+      manualDecision = newDecision
+      manualExplanation = newComment.trim()
+      decisionSource = 'manual'
+    }
+
+    updateProject(activeProject.id, (project) => ({
+      ...project,
+      lists: project.lists.map((list, idx) => {
+        if (list.id === activeList.id) {
+          if (idx === 0) {
+            return {
+              ...list,
+              papers: (list.papers as Paper[]).map((p) => {
+                if (p.id !== paperId) return p
+                return {
+                  ...p,
+                  include: finalDecision,
+                  decision: finalDecision,
+                  explanation: finalExplanation,
+                  rationale: finalExplanation,
+                  manualDecision,
+                  manualExplanation,
+                  aiDecision: aiDec,
+                  aiExplanation: aiExpl,
+                  decisionSource,
+                  score: finalDecision === 'Yes' ? 10 : finalDecision === 'No' ? 0 : finalDecision === 'Not Sure' ? 5 : undefined,
+                }
+              }),
+            }
+          }
+          return {
+            ...list,
+            papers: (list.papers as PaperRef[]).map((ref) => {
+              if (ref.id !== paperId) return ref
+              return {
+                ...ref,
+                include: finalDecision,
+                decision: finalDecision,
+                explanation: finalExplanation,
+                rationale: finalExplanation,
+                manualDecision,
+                manualExplanation,
+                aiDecision: aiDec,
+                aiExplanation: aiExpl,
+                decisionSource,
+                score: finalDecision === 'Yes' ? 10 : finalDecision === 'No' ? 0 : finalDecision === 'Not Sure' ? 5 : undefined,
+              }
+            }),
+          }
+        }
+        return list
+      }),
+    }))
+
+    setOverrideTargetPaper(null)
+    setToast(revertToAi ? 'Reverted to original AI screening evaluation' : 'Screening decision & comment updated')
   }
 
   function togglePaperVisibility(paperId: string) {
@@ -753,6 +899,11 @@ function App() {
             decision: dec,
             explanation: expl,
             rationale: expl,
+            aiDecision: dec,
+            aiExplanation: expl,
+            manualDecision: undefined,
+            manualExplanation: undefined,
+            decisionSource: 'ai' as DecisionSource,
             score: dec === 'Yes' ? 10 : dec === 'No' ? 0 : 5,
           }
         })
@@ -872,6 +1023,11 @@ function App() {
         ref.explanation = paper.explanation || paper.rationale
         ref.rationale = paper.explanation || paper.rationale
       }
+      if (paper.aiDecision) ref.aiDecision = paper.aiDecision
+      if (paper.aiExplanation) ref.aiExplanation = paper.aiExplanation
+      if (paper.manualDecision) ref.manualDecision = paper.manualDecision
+      if (paper.manualExplanation) ref.manualExplanation = paper.manualExplanation
+      if (paper.decisionSource) ref.decisionSource = paper.decisionSource
       if (paper.score !== undefined) ref.score = paper.score
       if (paper.manualVisibility) ref.manualVisibility = paper.manualVisibility
       if (paper.extractedData) ref.extractedData = paper.extractedData
@@ -964,7 +1120,12 @@ function App() {
 
         if (hasScreening) {
           row['Screening Decision'] = paper.include || paper.decision || (paper.score !== undefined ? (paper.score >= 8 ? 'Yes' : paper.score >= 5 ? 'Not Sure' : 'No') : '')
+          row['Decision Source'] = (paper.decisionSource === 'manual' || paper.manualDecision) ? 'Manual Override' : (paper.decisionSource === 'ai' || (paper.include || paper.decision) ? 'AI Screening' : '')
           row['Screening Explanation'] = paper.explanation || paper.rationale || ''
+          row['AI Decision'] = paper.aiDecision || (!paper.manualDecision ? (paper.include || paper.decision || '') : '')
+          row['AI Explanation'] = paper.aiExplanation || (!paper.manualDecision ? (paper.explanation || '') : '')
+          row['Manual Decision'] = paper.manualDecision || ''
+          row['Manual Explanation'] = paper.manualExplanation || ''
         }
 
         for (const f of extractionCols) {
@@ -1004,7 +1165,12 @@ function App() {
         if (hasScreening) {
           headerRow.push(
             { value: 'Screening Decision', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
+            { value: 'Decision Source', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
             { value: 'Screening Explanation', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
+            { value: 'AI Decision', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
+            { value: 'AI Explanation', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
+            { value: 'Manual Decision', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
+            { value: 'Manual Explanation', fontWeight: 'bold' as const, backgroundColor: '#E8F0E8' },
           )
         }
 
@@ -1033,7 +1199,12 @@ function App() {
           if (hasScreening) {
             row.push(
               paper.include || paper.decision || (paper.score !== undefined ? (paper.score >= 8 ? 'Yes' : paper.score >= 5 ? 'Not Sure' : 'No') : ''),
+              (paper.decisionSource === 'manual' || paper.manualDecision) ? 'Manual Override' : (paper.decisionSource === 'ai' || (paper.include || paper.decision) ? 'AI Screening' : ''),
               paper.explanation || paper.rationale || '',
+              paper.aiDecision || (!paper.manualDecision ? (paper.include || paper.decision || '') : ''),
+              paper.aiExplanation || (!paper.manualDecision ? (paper.explanation || '') : ''),
+              paper.manualDecision || '',
+              paper.manualExplanation || '',
             )
           }
 
@@ -1379,7 +1550,7 @@ function App() {
                           <th className="year-heading">YEAR</th>
                           <th className="journal-heading">SOURCE</th>
                           {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => (p.include || p.decision) !== undefined || p.score !== undefined)) && (
-                            <th className="decision-heading">AI DECISION</th>
+                            <th className="decision-heading">DECISION</th>
                           )}
                           <th className="manuscript-action-heading">MANUSCRIPT</th>
                           {/* Dynamic Data Extraction Columns directly in the table */}
@@ -1413,28 +1584,70 @@ function App() {
                                 <span className="paper-authors">{paper.authors || 'Author not listed'}{paper.doi && <span className="doi-label">DOI {paper.doi}</span>}{paper.manualVisibility === 'show' && <span className="manual-vis-badge show-badge"><Eye size={10} /> Force Shown</span>}{paper.manualVisibility === 'hide' && <span className="manual-vis-badge hide-badge"><EyeOff size={10} /> Manually Hidden</span>}</span>
                                 {paper.abstract && paper.abstract.trim() ? (
                                   <details className="abstract-details">
-                                    <summary>Abstract</summary>
+                                    <summary>Abstract & Screening Remarks</summary>
                                     <p>{paper.abstract}</p>
-                                    {expl && (
-                                      <div className="paper-inline-explanation">
-                                        <div className="inline-explanation-header">
-                                          <Sparkles size={11} />
-                                          <span>AI SCREENING EXPLANATION ({dec ? dec.toUpperCase() : 'EVALUATION'})</span>
+                                    {/* Manual Reviewer Remarks */}
+                                    {(paper.manualExplanation || (paper.decisionSource === 'manual' && expl)) && (
+                                      <div className="paper-inline-explanation manual-explanation-block">
+                                        <div className="inline-explanation-header manual-explanation-header">
+                                          <User size={11} />
+                                          <span>MANUAL REVIEWER REMARKS ({dec ? dec.toUpperCase() : 'SCREENING'} · OVERRIDE)</span>
+                                          <button
+                                            type="button"
+                                            className="inline-edit-note-btn"
+                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); openDecisionOverride(paper) }}
+                                            title="Edit manual remarks"
+                                          >
+                                            <Pencil size={9} /> Edit
+                                          </button>
                                         </div>
-                                        <p className="inline-explanation-text">{expl}</p>
+                                        <p className="inline-explanation-text">{paper.manualExplanation || expl}</p>
+                                      </div>
+                                    )}
+                                    {/* AI Screening Remarks */}
+                                    {(paper.aiExplanation || (paper.decisionSource !== 'manual' && expl)) && (
+                                      <div className="paper-inline-explanation ai-explanation-block">
+                                        <div className="inline-explanation-header ai-explanation-header">
+                                          <Sparkles size={11} />
+                                          <span>
+                                            {paper.decisionSource === 'manual' ? `ORIGINAL AI EVALUATION (${paper.aiDecision ? paper.aiDecision.toUpperCase() : 'AI'})` : `AI SCREENING EXPLANATION (${dec ? dec.toUpperCase() : 'EVALUATION'})`}
+                                          </span>
+                                        </div>
+                                        <p className="inline-explanation-text">{paper.aiExplanation || expl}</p>
                                       </div>
                                     )}
                                   </details>
                                 ) : (
                                   <div className="paper-no-abstract-wrap">
                                     <span className="missing-abstract-pill">No abstract</span>
-                                    {expl && (
-                                      <div className="paper-inline-explanation">
-                                        <div className="inline-explanation-header">
-                                          <Sparkles size={11} />
-                                          <span>AI SCREENING EXPLANATION ({dec ? dec.toUpperCase() : 'EVALUATION'})</span>
+                                    {/* Manual Reviewer Remarks */}
+                                    {(paper.manualExplanation || (paper.decisionSource === 'manual' && expl)) && (
+                                      <div className="paper-inline-explanation manual-explanation-block">
+                                        <div className="inline-explanation-header manual-explanation-header">
+                                          <User size={11} />
+                                          <span>MANUAL REVIEWER REMARKS ({dec ? dec.toUpperCase() : 'SCREENING'} · OVERRIDE)</span>
+                                          <button
+                                            type="button"
+                                            className="inline-edit-note-btn"
+                                            onClick={() => openDecisionOverride(paper)}
+                                            title="Edit manual remarks"
+                                          >
+                                            <Pencil size={9} /> Edit
+                                          </button>
                                         </div>
-                                        <p className="inline-explanation-text">{expl}</p>
+                                        <p className="inline-explanation-text">{paper.manualExplanation || expl}</p>
+                                      </div>
+                                    )}
+                                    {/* AI Screening Remarks */}
+                                    {(paper.aiExplanation || (paper.decisionSource !== 'manual' && expl)) && (
+                                      <div className="paper-inline-explanation ai-explanation-block">
+                                        <div className="inline-explanation-header ai-explanation-header">
+                                          <Sparkles size={11} />
+                                          <span>
+                                            {paper.decisionSource === 'manual' ? `ORIGINAL AI EVALUATION (${paper.aiDecision ? paper.aiDecision.toUpperCase() : 'AI'})` : `AI SCREENING EXPLANATION (${dec ? dec.toUpperCase() : 'EVALUATION'})`}
+                                          </span>
+                                        </div>
+                                        <p className="inline-explanation-text">{paper.aiExplanation || expl}</p>
                                       </div>
                                     )}
                                   </div>
@@ -1446,23 +1659,60 @@ function App() {
                                 <td className="decision-cell">
                                   {dec ? (
                                     <div className="decision-cell-inner">
-                                      <span
-                                        className={`decision-pill ${dec === 'Yes' ? 'decision-yes' : dec === 'No' ? 'decision-no' : 'decision-notsure'}`}
-                                        title={expl || `Screened as ${dec}`}
-                                      >
-                                        {dec === 'Yes' && <Check size={11} />}
-                                        {dec === 'Not Sure' && <CircleHelp size={11} />}
-                                        {dec === 'No' && <X size={11} />}
-                                        <span>{dec}</span>
-                                      </span>
+                                      <div className="decision-cell-header-row">
+                                        <button
+                                          type="button"
+                                          className={`decision-pill ${dec === 'Yes' ? 'decision-yes' : dec === 'No' ? 'decision-no' : 'decision-notsure'} ${paper.decisionSource === 'manual' || paper.manualDecision ? 'decision-pill-manual' : 'decision-pill-ai'}`}
+                                          onClick={() => openDecisionOverride(paper)}
+                                          title={`Click to edit or override decision (${paper.decisionSource === 'manual' || paper.manualDecision ? 'Manual Override' : 'AI Screening'})`}
+                                        >
+                                          {paper.decisionSource === 'manual' || paper.manualDecision ? (
+                                            <User size={10} className="decision-source-icon" />
+                                          ) : (
+                                            <Sparkles size={10} className="decision-source-icon" />
+                                          )}
+                                          {dec === 'Yes' && <Check size={11} />}
+                                          {dec === 'Not Sure' && <CircleHelp size={11} />}
+                                          {dec === 'No' && <X size={11} />}
+                                          <span>{dec}</span>
+                                          <span className="decision-badge-source">
+                                            {paper.decisionSource === 'manual' || paper.manualDecision ? 'Manual' : 'AI'}
+                                          </span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="decision-quick-edit-btn"
+                                          onClick={() => openDecisionOverride(paper)}
+                                          title="Override decision or edit remarks"
+                                        >
+                                          <Pencil size={10} />
+                                        </button>
+                                      </div>
                                       {expl && (
-                                        <span className="decision-reason" title={expl}>
-                                          {expl}
-                                        </span>
+                                        <div
+                                          className={`decision-reason ${paper.decisionSource === 'manual' || paper.manualDecision ? 'decision-reason-manual' : 'decision-reason-ai'}`}
+                                          title={expl}
+                                          onClick={() => openDecisionOverride(paper)}
+                                        >
+                                          {paper.decisionSource === 'manual' || paper.manualDecision ? (
+                                            <User size={8} className="reason-source-icon" />
+                                          ) : (
+                                            <Sparkles size={8} className="reason-source-icon" />
+                                          )}
+                                          <span>{expl}</span>
+                                        </div>
                                       )}
                                     </div>
                                   ) : (
-                                    <span className="not-screened">Unscreened</span>
+                                    <button
+                                      type="button"
+                                      className="not-screened not-screened-btn"
+                                      onClick={() => openDecisionOverride(paper)}
+                                      title="Set screening decision & comment"
+                                    >
+                                      <span>Unscreened</span>
+                                      <Plus size={10} />
+                                    </button>
                                   )}
                                 </td>
                               )}
@@ -1555,6 +1805,132 @@ function App() {
 
     <input ref={manuscriptInputRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={(event) => void handleManuscriptFile(event.target.files?.[0])} />
     {manuscriptPaper?.manuscript && <ManuscriptPanel paper={manuscriptPaper as Paper & { manuscript: ManuscriptMetadata }} onClose={() => setManuscriptPaper(null)} />}
+
+    {/* Override Screening Decision & Remarks Modal */}
+    {overrideTargetPaper && (
+      <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverrideTargetPaper(null) }}>
+        <section className="modal override-modal" aria-labelledby="override-modal-title">
+          <div className="modal-topline">
+            <span className="modal-icon modal-icon-accent"><User size={17} /></span>
+            <button type="button" className="icon-button" onClick={() => setOverrideTargetPaper(null)} title="Close"><X size={17} /></button>
+          </div>
+
+          <span className="section-kicker">MANUAL SCREENING OVERRIDE</span>
+          <h2 id="override-modal-title">Override Screening Decision</h2>
+          <p className="modal-description">Set or update your manual reviewer decision and screening remarks for this paper.</p>
+
+          {/* Paper summary card */}
+          <div className="override-paper-card">
+            <div className="override-paper-title">{overrideTargetPaper.title}</div>
+            <div className="override-paper-meta">
+              <span>{overrideTargetPaper.authors || 'Author not listed'}</span>
+              {overrideTargetPaper.year && <span> · {overrideTargetPaper.year}</span>}
+              {overrideTargetPaper.journal && <span> · {overrideTargetPaper.journal}</span>}
+            </div>
+          </div>
+
+          {/* AI recommendation preview box (if paper was evaluated by AI) */}
+          {(overrideTargetPaper.aiDecision || (overrideTargetPaper.decisionSource !== 'manual' && (overrideTargetPaper.include || overrideTargetPaper.decision))) && (
+            <div className="override-ai-card">
+              <div className="override-ai-header">
+                <div className="override-ai-tag">
+                  <Sparkles size={11} />
+                  <span>AI RECOMMENDATION</span>
+                </div>
+                {(() => {
+                  const aiDec = overrideTargetPaper.aiDecision || overrideTargetPaper.include || overrideTargetPaper.decision
+                  return (
+                    <span className={`decision-pill ${aiDec === 'Yes' ? 'decision-yes' : aiDec === 'No' ? 'decision-no' : 'decision-notsure'}`}>
+                      {aiDec === 'Yes' && <Check size={10} />}
+                      {aiDec === 'Not Sure' && <CircleHelp size={10} />}
+                      {aiDec === 'No' && <X size={10} />}
+                      <span>{aiDec}</span>
+                    </span>
+                  )
+                })()}
+              </div>
+              <p className="override-ai-reason">
+                {overrideTargetPaper.aiExplanation || (overrideTargetPaper.decisionSource !== 'manual' ? overrideTargetPaper.explanation : '') || 'No AI rationale provided.'}
+              </p>
+              {(overrideTargetPaper.aiExplanation || (overrideTargetPaper.decisionSource !== 'manual' && overrideTargetPaper.explanation)) && (
+                <button
+                  type="button"
+                  className="override-copy-ai-btn"
+                  onClick={() => setOverrideComment(overrideTargetPaper.aiExplanation || overrideTargetPaper.explanation || '')}
+                  title="Copy AI explanation into your comment"
+                >
+                  <ClipboardList size={11} /> Copy AI note into comment
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Decision Selector */}
+          <div className="override-form-group">
+            <label className="field-label">REVIEWER DECISION</label>
+            <div className="decision-radio-group">
+              {(['Yes', 'Not Sure', 'No', 'unscreened'] as const).map((decOption) => {
+                const isSelected = overrideDecision === decOption
+                return (
+                  <button
+                    key={decOption}
+                    type="button"
+                    className={`decision-option-btn ${isSelected ? 'selected' : ''} ${decOption === 'Yes' ? 'opt-yes' : decOption === 'No' ? 'opt-no' : decOption === 'Not Sure' ? 'opt-notsure' : 'opt-unscreened'}`}
+                    onClick={() => setOverrideDecision(decOption)}
+                  >
+                    {decOption === 'Yes' && <Check size={13} />}
+                    {decOption === 'Not Sure' && <CircleHelp size={13} />}
+                    {decOption === 'No' && <X size={13} />}
+                    {decOption === 'unscreened' && <RotateCcw size={13} />}
+                    <span>{decOption === 'unscreened' ? 'Clear (Unscreened)' : decOption}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Comment / Explanation */}
+          <div className="override-form-group">
+            <label className="field-label" htmlFor="override-comment-input">
+              REVIEWER REMARKS / EXPLANATION
+            </label>
+            <textarea
+              id="override-comment-input"
+              className="text-field override-textarea"
+              rows={4}
+              value={overrideComment}
+              onChange={(e) => setOverrideComment(e.target.value)}
+              placeholder="Explain your manual screening decision, inclusion/exclusion rationale, or study notes..."
+            />
+          </div>
+
+          <div className="modal-actions override-modal-actions">
+            {overrideTargetPaper.decisionSource === 'manual' && (overrideTargetPaper.aiDecision || overrideTargetPaper.aiExplanation) ? (
+              <button
+                type="button"
+                className="button button-quiet override-revert-btn"
+                onClick={() => saveDecisionOverride(overrideTargetPaper.id, 'unscreened', '', true)}
+                title="Discard manual override and revert to AI screening result"
+              >
+                <RotateCcw size={13} /> Revert to AI
+              </button>
+            ) : <span />}
+            <div className="override-right-actions">
+              <button type="button" className="button button-quiet" onClick={() => setOverrideTargetPaper(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => saveDecisionOverride(overrideTargetPaper.id, overrideDecision, overrideComment, false)}
+              >
+                <User size={13} /> Save Decision
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    )}
 
     {/* Section Mapping Modal (Triggered on PDF Upload or on demand) */}
     {sectionMappingTarget && (
