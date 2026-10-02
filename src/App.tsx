@@ -1679,70 +1679,22 @@ function App() {
 
               {activeList.stageType !== 'synthesis' && (
                 <div className="toolbar-actions">
-                  <div className="visibility-filter-tabs" role="group" aria-label="Filter visibility">
-                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'included' ? 'active' : ''}`} onClick={() => setVisibilityFilter('included')} title="Show papers included in this stage"><Eye size={13} /><span>Included</span><span className="tab-pill-count">{includedCount}</span></button>
-                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'hidden' ? 'active' : ''}`} onClick={() => setVisibilityFilter('hidden')} title="Show papers hidden from this stage"><EyeOff size={13} /><span>Hidden</span><span className="tab-pill-count">{hiddenCount}</span></button>
-                    <button type="button" className={`visibility-filter-tab ${visibilityFilter === 'all' ? 'active' : ''}`} onClick={() => setVisibilityFilter('all')} title="Show all papers in this stage"><span>All</span><span className="tab-pill-count">{resolvedActiveListPapers.length}</span></button>
-                  </div>
-
-                  {screenedCount > 0 && (
-                    <div className="decision-filter-dropdown-wrap">
-                      <label htmlFor="decision-filter-select" className="decision-filter-label">
-                        DECISION:
-                      </label>
-                      <select
-                        id="decision-filter-select"
-                        className="decision-filter-select"
-                        value={decisionFilter}
-                        onChange={(event) => setDecisionFilter(event.target.value as DecisionFilter)}
-                        aria-label="Filter by AI screening decision"
-                      >
-                        <option value="all">All Decisions ({screenedCount})</option>
-                        <option value="Yes">Yes ({yesCount})</option>
-                        <option value="Not Sure">Not Sure ({notSureCount})</option>
-                        <option value="No">No ({noCount})</option>
-                      </select>
-                    </div>
+                  {(visibilityFilter !== 'included' || decisionFilter !== 'all' || abstractFilter !== 'all' || manuscriptFilter !== 'all' || search) && (
+                    <button
+                      type="button"
+                      className="button button-quiet button-reset-inline"
+                      onClick={() => {
+                        setVisibilityFilter('included')
+                        setDecisionFilter('all')
+                        setAbstractFilter('all')
+                        setManuscriptFilter('all')
+                        setSearch('')
+                      }}
+                      title="Reset all column filters to defaults"
+                    >
+                      <RotateCcw size={12} /> Reset Filters
+                    </button>
                   )}
-
-                  {resolvedActiveListPapers.length > 0 && (
-                    <div className="abstract-filter-dropdown-wrap">
-                      <label htmlFor="abstract-filter-select" className="abstract-filter-label">
-                        ABSTRACT:
-                      </label>
-                      <select
-                        id="abstract-filter-select"
-                        className="abstract-filter-select"
-                        value={abstractFilter}
-                        onChange={(event) => setAbstractFilter(event.target.value as AbstractFilter)}
-                        aria-label="Filter by abstract availability"
-                      >
-                        <option value="all">All ({resolvedActiveListPapers.length})</option>
-                        <option value="has_abstract">Has Abstract ({hasAbstractCount})</option>
-                        <option value="missing_abstract">Missing Abstract ({missingAbstractCount})</option>
-                      </select>
-                    </div>
-                  )}
-
-                  {resolvedActiveListPapers.length > 0 && (
-                    <div className="manuscript-filter-dropdown-wrap">
-                      <label htmlFor="manuscript-filter-select" className="manuscript-filter-label">
-                        MANUSCRIPT:
-                      </label>
-                      <select
-                        id="manuscript-filter-select"
-                        className="manuscript-filter-select"
-                        value={manuscriptFilter}
-                        onChange={(event) => setManuscriptFilter(event.target.value as ManuscriptFilter)}
-                        aria-label="Filter by manuscript availability"
-                      >
-                        <option value="all">All ({resolvedActiveListPapers.length})</option>
-                        <option value="missing_manuscript">Missing Manuscript ({missingManuscriptCount})</option>
-                        <option value="has_manuscript">Has Manuscript ({hasManuscriptCount})</option>
-                      </select>
-                    </div>
-                  )}
-
                   <label className="search-box"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search papers" aria-label="Search papers" /><kbd>/</kbd></label>
                 </div>
               )}
@@ -1777,14 +1729,90 @@ function App() {
                       <thead>
                         <tr>
                           <th className="check-column"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Select all visible papers" /></th>
-                          <th className="visibility-column" title="Toggle visibility"><Eye size={13} /></th>
-                          <th className="paper-heading">PAPER <span>{visiblePapers.length === resolvedActiveListPapers.length ? resolvedActiveListPapers.length.toLocaleString() : `${visiblePapers.length} of ${resolvedActiveListPapers.length}`}</span></th>
+                          <th className="visibility-column" title={`Visibility filter: ${visibilityFilter === 'included' ? `Included (${includedCount})` : visibilityFilter === 'hidden' ? `Hidden (${hiddenCount})` : `All (${resolvedActiveListPapers.length})`}`}>
+                            <div className="header-visibility-filter-wrap">
+                              <select
+                                className={`header-visibility-select ${visibilityFilter !== 'included' ? 'is-filtered' : ''}`}
+                                value={visibilityFilter}
+                                onChange={(e) => setVisibilityFilter(e.target.value as VisibilityFilter)}
+                                aria-label="Filter visibility: Included, Hidden, or All"
+                                title={`Visibility: ${visibilityFilter === 'included' ? `Included (${includedCount})` : visibilityFilter === 'hidden' ? `Hidden (${hiddenCount})` : `All (${resolvedActiveListPapers.length})`}`}
+                              >
+                                <option value="included">👁 Included ({includedCount})</option>
+                                <option value="hidden">🚫 Hidden ({hiddenCount})</option>
+                                <option value="all">📂 All ({resolvedActiveListPapers.length})</option>
+                              </select>
+                              <div className="header-visibility-indicator">
+                                {visibilityFilter === 'included' ? (
+                                  <Eye size={13} />
+                                ) : visibilityFilter === 'hidden' ? (
+                                  <EyeOff size={13} />
+                                ) : (
+                                  <ListFilter size={13} />
+                                )}
+                              </div>
+                            </div>
+                          </th>
+                          <th className="paper-heading">
+                            <div className="header-filter-wrap header-paper-wrap">
+                              <span>PAPER</span>
+                              <span className="paper-count-badge">
+                                {visiblePapers.length === resolvedActiveListPapers.length
+                                  ? resolvedActiveListPapers.length.toLocaleString()
+                                  : `${visiblePapers.length} of ${resolvedActiveListPapers.length}`}
+                              </span>
+                              {resolvedActiveListPapers.length > 0 && (
+                                <select
+                                  className={`header-filter-select header-abstract-select ${abstractFilter !== 'all' ? 'is-filtered' : ''}`}
+                                  value={abstractFilter}
+                                  onChange={(e) => setAbstractFilter(e.target.value as AbstractFilter)}
+                                  aria-label="Filter by abstract availability"
+                                  title="Filter papers by abstract availability"
+                                >
+                                  <option value="all">Abstract: All ({resolvedActiveListPapers.length})</option>
+                                  <option value="has_abstract">Has Abstract ({hasAbstractCount})</option>
+                                  <option value="missing_abstract">Missing Abstract ({missingAbstractCount})</option>
+                                </select>
+                              )}
+                            </div>
+                          </th>
                           <th className="year-heading">YEAR</th>
                           <th className="journal-heading">SOURCE</th>
                           {(activeList.stageType === 'screening' || resolvedActiveListPapers.some((p) => (p.include || p.decision) !== undefined || p.score !== undefined)) && (
-                            <th className="decision-heading">DECISION</th>
+                            <th className="decision-heading">
+                              <div className="header-filter-wrap">
+                                <span>DECISION</span>
+                                <select
+                                  className={`header-filter-select ${decisionFilter !== 'all' ? 'is-filtered' : ''}`}
+                                  value={decisionFilter}
+                                  onChange={(e) => setDecisionFilter(e.target.value as DecisionFilter)}
+                                  aria-label="Filter by AI screening decision"
+                                  title="Filter by screening decision"
+                                >
+                                  <option value="all">All ({screenedCount})</option>
+                                  <option value="Yes">Yes ({yesCount})</option>
+                                  <option value="Not Sure">Not Sure ({notSureCount})</option>
+                                  <option value="No">No ({noCount})</option>
+                                </select>
+                              </div>
+                            </th>
                           )}
-                          <th className="manuscript-action-heading">MANUSCRIPT</th>
+                          <th className="manuscript-action-heading">
+                            <div className="header-filter-wrap">
+                              <span>MANUSCRIPT</span>
+                              <select
+                                className={`header-filter-select ${manuscriptFilter !== 'all' ? 'is-filtered' : ''}`}
+                                value={manuscriptFilter}
+                                onChange={(e) => setManuscriptFilter(e.target.value as ManuscriptFilter)}
+                                aria-label="Filter by manuscript availability"
+                                title="Filter by manuscript availability"
+                              >
+                                <option value="all">All ({resolvedActiveListPapers.length})</option>
+                                <option value="missing_manuscript">Missing ({missingManuscriptCount})</option>
+                                <option value="has_manuscript">Attached ({hasManuscriptCount})</option>
+                              </select>
+                            </div>
+                          </th>
                           {/* Dynamic Data Extraction Columns directly in the table */}
                           {activeExtractionFields.map((f) => (
                             <th key={f.name} className="extracted-col-header" title={f.description || f.name}>
