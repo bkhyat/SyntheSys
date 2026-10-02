@@ -110,6 +110,8 @@ def initialize_database() -> None:
         }
         if "stage_type" not in paper_list_columns:
             connection.execute("ALTER TABLE paper_lists ADD COLUMN stage_type TEXT DEFAULT 'standard'")
+        if "screening_type" not in paper_list_columns:
+            connection.execute("ALTER TABLE paper_lists ADD COLUMN screening_type TEXT DEFAULT 'abstract'")
         if "inclusion_criteria" not in paper_list_columns:
             connection.execute("ALTER TABLE paper_lists ADD COLUMN inclusion_criteria TEXT DEFAULT ''")
         if "exclusion_criteria" not in paper_list_columns:
@@ -256,6 +258,7 @@ def get_projects() -> list[dict[str, Any]]:
                     "name": paper_list["name"],
                     "minScore": paper_list["min_score"],
                     "stageType": paper_list["stage_type"] if "stage_type" in paper_list.keys() and paper_list["stage_type"] else "standard",
+                    "screeningType": paper_list["screening_type"] if "screening_type" in paper_list.keys() and paper_list["screening_type"] else "abstract",
                     "inclusionCriteria": paper_list["inclusion_criteria"] if "inclusion_criteria" in paper_list.keys() and paper_list["inclusion_criteria"] else "",
                     "exclusionCriteria": paper_list["exclusion_criteria"] if "exclusion_criteria" in paper_list.keys() and paper_list["exclusion_criteria"] else "",
                     "extractionFields": parsed_extraction_fields,
@@ -283,6 +286,7 @@ def replace_projects(projects: list[dict[str, Any]]) -> None:
             )
             for list_position, paper_list in enumerate(project["lists"]):
                 stage_type = paper_list.get("stageType", "standard") or "standard"
+                screening_type = paper_list.get("screeningType", "abstract") or "abstract"
                 inclusion_criteria = paper_list.get("inclusionCriteria", "") or ""
                 exclusion_criteria = paper_list.get("exclusionCriteria", "") or ""
                 synthesis_text = paper_list.get("synthesisText", "") or ""
@@ -291,8 +295,8 @@ def replace_projects(projects: list[dict[str, Any]]) -> None:
 
                 connection.execute(
                     """
-                    INSERT INTO paper_lists (id, project_id, name, min_score, position, stage_type, inclusion_criteria, exclusion_criteria, extraction_fields, synthesis_text, synthesis_prompt)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO paper_lists (id, project_id, name, min_score, position, stage_type, screening_type, inclusion_criteria, exclusion_criteria, extraction_fields, synthesis_text, synthesis_prompt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         paper_list["id"],
@@ -301,6 +305,7 @@ def replace_projects(projects: list[dict[str, Any]]) -> None:
                         paper_list.get("minScore", 9),
                         list_position,
                         stage_type,
+                        screening_type,
                         inclusion_criteria,
                         exclusion_criteria,
                         extraction_fields_json,

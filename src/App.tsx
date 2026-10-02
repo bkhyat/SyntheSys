@@ -11,6 +11,7 @@ import type { ManuscriptDocument, ManuscriptMetadata } from './types'
 export type ManualVisibility = 'show' | 'hide'
 export type VisibilityFilter = 'included' | 'hidden' | 'all'
 export type StageType = 'standard' | 'screening' | 'extraction' | 'synthesis'
+export type ScreeningType = 'abstract' | 'manuscript'
 export type ScreeningDecision = 'Yes' | 'No' | 'Not Sure'
 export type DecisionFilter = 'all' | 'Yes' | 'Not Sure' | 'No' | 'unscreened'
 export type AbstractFilter = 'all' | 'has_abstract' | 'missing_abstract'
@@ -54,6 +55,7 @@ export type PaperList = {
   id: string
   name: string
   stageType: StageType
+  screeningType?: ScreeningType
   inclusionCriteria?: string
   exclusionCriteria?: string
   extractionFields?: ExtractionField[]
@@ -77,6 +79,7 @@ function createList(name = 'Stage 1', stageType: StageType = 'standard', options
     id: crypto.randomUUID(),
     name,
     stageType,
+    screeningType: options?.screeningType ?? 'abstract',
     inclusionCriteria: options?.inclusionCriteria ?? '',
     exclusionCriteria: options?.exclusionCriteria ?? '',
     extractionFields: options?.extractionFields ?? (stageType === 'extraction' ? DEFAULT_EXTRACTION_FIELDS : []),
@@ -156,6 +159,7 @@ function App() {
   const [createTarget, setCreateTarget] = useState(false)
   const [targetListName, setTargetListName] = useState('Stage 2')
   const [targetStageType, setTargetStageType] = useState<StageType>('screening')
+  const [copyScreeningType, setCopyScreeningType] = useState<ScreeningType>('abstract')
   const [inclusionCriteria, setInclusionCriteria] = useState('')
   const [exclusionCriteria, setExclusionCriteria] = useState('')
   const [copyExtractionFields, setCopyExtractionFields] = useState<ExtractionField[]>(DEFAULT_EXTRACTION_FIELDS)
@@ -173,6 +177,7 @@ function App() {
   const [stageModalListId, setStageModalListId] = useState<string | null>(null)
   const [stageDraftName, setStageDraftName] = useState('')
   const [stageDraftType, setStageDraftType] = useState<StageType>('standard')
+  const [stageDraftScreeningType, setStageDraftScreeningType] = useState<ScreeningType>('abstract')
   const [stageDraftInclusion, setStageDraftInclusion] = useState('')
   const [stageDraftExclusion, setStageDraftExclusion] = useState('')
   const [stageDraftFields, setStageDraftFields] = useState<ExtractionField[]>(DEFAULT_EXTRACTION_FIELDS)
@@ -622,6 +627,7 @@ function App() {
     setStageModalListId(null)
     setStageDraftName(`Stage ${nextNum}`)
     setStageDraftType(nextNum === 2 ? 'screening' : nextNum === 3 ? 'extraction' : nextNum === 4 ? 'synthesis' : 'standard')
+    setStageDraftScreeningType('abstract')
     setStageDraftInclusion('')
     setStageDraftExclusion('')
     setStageDraftFields(DEFAULT_EXTRACTION_FIELDS)
@@ -636,6 +642,7 @@ function App() {
     setStageModalListId(list.id)
     setStageDraftName(list.name)
     setStageDraftType(list.stageType ?? 'standard')
+    setStageDraftScreeningType(list.screeningType ?? 'abstract')
     setStageDraftInclusion(list.inclusionCriteria ?? '')
     setStageDraftExclusion(list.exclusionCriteria ?? '')
     setStageDraftFields(list.extractionFields && list.extractionFields.length > 0 ? list.extractionFields : DEFAULT_EXTRACTION_FIELDS)
@@ -656,6 +663,7 @@ function App() {
 
     if (stageModalMode === 'create') {
       const newList = createList(name, stageDraftType, {
+        screeningType: stageDraftType === 'screening' ? stageDraftScreeningType : 'abstract',
         inclusionCriteria: stageDraftInclusion.trim(),
         exclusionCriteria: stageDraftExclusion.trim(),
         extractionFields: stageDraftType === 'extraction' ? cleanFields : [],
@@ -666,7 +674,9 @@ function App() {
         lists: [...project.lists, newList],
       }))
       setActiveListId(newList.id)
-      const typeLabel = stageDraftType === 'screening' ? 'AI Screening' : stageDraftType === 'extraction' ? 'AI Data Extraction' : stageDraftType === 'synthesis' ? 'AI Synthesis' : 'Standard'
+      const typeLabel = stageDraftType === 'screening'
+        ? `AI Screening (${stageDraftScreeningType === 'manuscript' ? 'Manuscript' : 'Title/Abstract'})`
+        : stageDraftType === 'extraction' ? 'AI Data Extraction' : stageDraftType === 'synthesis' ? 'AI Synthesis' : 'Standard'
       setToast(`Created ${name} (${typeLabel})`)
     } else if (stageModalMode === 'edit' && stageModalListId) {
       updateProject(activeProject.id, (project) => ({
@@ -677,6 +687,7 @@ function App() {
               ...list,
               name,
               stageType: stageDraftType,
+              screeningType: stageDraftType === 'screening' ? stageDraftScreeningType : (list.screeningType ?? 'abstract'),
               inclusionCriteria: stageDraftInclusion.trim(),
               exclusionCriteria: stageDraftExclusion.trim(),
               extractionFields: stageDraftType === 'extraction' ? cleanFields : list.extractionFields,
@@ -830,12 +841,14 @@ function App() {
     setTargetListName(`Stage ${activeProject.lists.length + 1}`)
     if (other) {
       setTargetStageType(other.stageType ?? 'standard')
+      setCopyScreeningType(other.screeningType ?? 'abstract')
       setInclusionCriteria(other.inclusionCriteria ?? '')
       setExclusionCriteria(other.exclusionCriteria ?? '')
       setCopyExtractionFields(other.extractionFields?.length ? other.extractionFields : DEFAULT_EXTRACTION_FIELDS)
       setCopySynthesisPrompt(other.synthesisPrompt ?? '')
     } else {
       setTargetStageType('screening')
+      setCopyScreeningType('abstract')
       setInclusionCriteria('')
       setExclusionCriteria('')
       setCopyExtractionFields(DEFAULT_EXTRACTION_FIELDS)
@@ -853,6 +866,7 @@ function App() {
     if (!destinationName) { setError('Choose a destination stage or create a new one.'); return }
 
     const effectiveStageType = createTarget ? targetStageType : (selectedTargetList?.stageType ?? 'standard')
+    const effectiveScreeningType = createTarget ? copyScreeningType : (selectedTargetList?.screeningType ?? copyScreeningType ?? 'abstract')
     const shouldScreen = action === 'auto' && effectiveStageType === 'screening'
     const shouldExtract = action === 'auto' && effectiveStageType === 'extraction'
     const shouldSynthesize = action === 'auto' && effectiveStageType === 'synthesis'
@@ -876,12 +890,18 @@ function App() {
       setScreening(true)
       try {
         const results: ScreeningResult[] = []
-        for (let offset = 0; offset < selectedPapers.length; offset += BATCH_SIZE) {
-          const batch = selectedPapers.slice(offset, offset + BATCH_SIZE)
-          setScreeningProgress(`Screening ${Math.min(offset + batch.length, selectedPapers.length)} of ${selectedPapers.length}`)
+        const currentBatchSize = effectiveScreeningType === 'manuscript' ? 4 : BATCH_SIZE
+        for (let offset = 0; offset < selectedPapers.length; offset += currentBatchSize) {
+          const batch = selectedPapers.slice(offset, offset + currentBatchSize)
+          setScreeningProgress(`Screening (${effectiveScreeningType === 'manuscript' ? 'Manuscript' : 'Title/Abstract'}) ${Math.min(offset + batch.length, selectedPapers.length)} of ${selectedPapers.length}`)
           const response = await fetch('/api/screen', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ papers: batch, inclusionCriteria, exclusionCriteria }),
+            body: JSON.stringify({
+              papers: batch,
+              inclusionCriteria,
+              exclusionCriteria,
+              screeningType: effectiveScreeningType,
+            }),
           })
           const payload = await response.json() as { results?: ScreeningResult[]; error?: string }
           if (!response.ok) throw new Error(payload.error || 'Screening request failed.')
@@ -1038,6 +1058,7 @@ function App() {
       id: destinationId,
       name: destinationName,
       stageType: effectiveStageType,
+      screeningType: effectiveStageType === 'screening' ? effectiveScreeningType : (selectedTargetList?.screeningType ?? 'abstract'),
       inclusionCriteria: shouldScreen ? inclusionCriteria.trim() : (createTarget ? inclusionCriteria.trim() : (selectedTargetList?.inclusionCriteria ?? '')),
       exclusionCriteria: shouldScreen ? exclusionCriteria.trim() : (createTarget ? exclusionCriteria.trim() : (selectedTargetList?.exclusionCriteria ?? '')),
       extractionFields: shouldExtract ? validExtractionFields : (createTarget ? (effectiveStageType === 'extraction' ? validExtractionFields : []) : (selectedTargetList?.extractionFields ?? [])),
@@ -1402,13 +1423,13 @@ function App() {
                     <b className="stat-breakdown-yes">{yesCount} Yes</b> · <b className="stat-breakdown-notsure">{notSureCount} Not Sure</b> · <b className="stat-breakdown-no">{noCount} No</b>
                   </span>
                 ) : (
-                  'Title + abstract screening'
+                  activeList?.stageType === 'screening' && activeList?.screeningType === 'manuscript' ? 'Manuscript screening' : 'Title + abstract screening'
                 )}
               </span>
             </div>
             <div className="stat-aside">
               <span className="stat-aside-mark"><ListFilter size={16} /></span>
-              <span>Title + abstract<br />screening</span>
+              <span>{activeList?.stageType === 'screening' && activeList?.screeningType === 'manuscript' ? <>Manuscript<br />screening</> : <>Title + abstract<br />screening</>}</span>
             </div>
           </div>
 
@@ -1426,7 +1447,7 @@ function App() {
                     aria-selected={list.id === activeListId}
                     className={`list-tab ${list.id === activeListId ? 'selected' : ''}`}
                     onClick={() => setActiveListId(list.id)}
-                    title={isScreening ? `${list.name} (AI Screening)` : isExtraction ? `${list.name} (AI Data Extraction)` : isSynthesis ? `${list.name} (AI Synthesis)` : `${list.name} (Standard)`}
+                    title={isScreening ? `${list.name} (AI Screening${list.screeningType === 'manuscript' ? ' - Manuscript' : ''})` : isExtraction ? `${list.name} (AI Data Extraction)` : isSynthesis ? `${list.name} (AI Synthesis)` : `${list.name} (Standard)`}
                   >
                     {isScreening && <Sparkles size={11} className="tab-stage-type-icon screening-icon" />}
                     {isExtraction && <Table2 size={11} className="tab-stage-type-icon extraction-icon" />}
@@ -2064,6 +2085,18 @@ function App() {
                 <span className="field-label">SCREENING CRITERIA</span>
                 <span className="gemini-tag"><Sparkles size={12} /> GEMINI AI</span>
               </div>
+              <label className="field-label criteria-label" htmlFor="stage-screening-type">
+                SCREENING SOURCE / TYPE
+              </label>
+              <select
+                id="stage-screening-type"
+                className="text-field select-field"
+                value={stageDraftScreeningType}
+                onChange={(e) => setStageDraftScreeningType(e.target.value as ScreeningType)}
+              >
+                <option value="abstract">Title / Abstract</option>
+                <option value="manuscript">Manuscript</option>
+              </select>
               <label className="field-label criteria-label" htmlFor="stage-inclusion">
                 INCLUSION CRITERIA <span>Required for screening</span>
               </label>
@@ -2221,6 +2254,7 @@ function App() {
                 const targetL = activeProject.lists.find((l) => l.id === newId)
                 if (targetL) {
                   setTargetStageType(targetL.stageType ?? 'standard')
+                  setCopyScreeningType(targetL.screeningType ?? 'abstract')
                   setInclusionCriteria(targetL.inclusionCriteria ?? '')
                   setExclusionCriteria(targetL.exclusionCriteria ?? '')
                   setCopyExtractionFields(targetL.extractionFields?.length ? targetL.extractionFields : DEFAULT_EXTRACTION_FIELDS)
@@ -2231,7 +2265,7 @@ function App() {
             >
               {activeProject.lists.filter((list) => list.id !== activeList.id).map((list) => (
                 <option key={list.id} value={list.id}>
-                  {list.name} {list.stageType === 'screening' ? '(AI Screening)' : list.stageType === 'extraction' ? '(AI Data Extraction)' : list.stageType === 'synthesis' ? '(AI Synthesis)' : '(Standard)'}
+                  {list.name} {list.stageType === 'screening' ? `(AI Screening${list.screeningType === 'manuscript' ? ' - Manuscript' : ''})` : list.stageType === 'extraction' ? '(AI Data Extraction)' : list.stageType === 'synthesis' ? '(AI Synthesis)' : '(Standard)'}
                 </option>
               ))}
             </select>
@@ -2312,6 +2346,19 @@ function App() {
                 <span className="field-label">AI SCREENING CONFIGURATION</span>
                 <span className="gemini-tag"><Sparkles size={12} /> GEMINI AI</span>
               </div>
+              <label className="field-label criteria-label" htmlFor="copy-screening-type">
+                SCREENING SOURCE / TYPE
+              </label>
+              <select
+                id="copy-screening-type"
+                className="text-field select-field"
+                value={copyScreeningType}
+                onChange={(e) => setCopyScreeningType(e.target.value as ScreeningType)}
+                disabled={screening || extracting || synthesizing}
+              >
+                <option value="abstract">Title / Abstract</option>
+                <option value="manuscript">Manuscript</option>
+              </select>
               <label className="field-label criteria-label" htmlFor="inclusion">
                 INCLUSION CRITERIA <span>Required for screening</span>
               </label>
@@ -2337,7 +2384,9 @@ function App() {
                 disabled={screening || extracting || synthesizing}
               />
               <p className="modal-privacy">
-                Titles and abstracts of the {selectedPapers.length} selected papers will be evaluated by LLM to classify inclusion (Yes, No, Not Sure) with detailed evidence-based explanations in the destination stage.
+                {copyScreeningType === 'manuscript'
+                  ? `Full manuscript text of the ${selectedPapers.length} selected papers will be evaluated by LLM against inclusion and exclusion criteria with detailed evidence-based explanations in the destination stage.`
+                  : `Titles and abstracts of the ${selectedPapers.length} selected papers will be evaluated by LLM to classify inclusion (Yes, No, Not Sure) with detailed evidence-based explanations in the destination stage.`}
               </p>
             </div>
           )}

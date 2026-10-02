@@ -367,7 +367,13 @@ async def screen_papers(screen_request: ScreeningInput) -> JSONResponse:
         return JSONResponse({"error": "Paper IDs must be unique within a screening request."}, status_code=400)
 
     try:
-        results = await screen_papers_with_llm(screen_request)
+        manuscripts: dict[str, Any] = {}
+        if (screen_request.screening_type or "").strip().lower() == "manuscript":
+            for paper_id in paper_ids:
+                manuscript = await run_in_threadpool(database.get_manuscript, paper_id)
+                if manuscript:
+                    manuscripts[paper_id] = manuscript
+        results = await screen_papers_with_llm(screen_request, manuscripts=manuscripts)
         return JSONResponse({"results": results})
     except RuntimeError as error:
         logger.warning("Screening service error: %s", error)

@@ -324,6 +324,64 @@ class LLMServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("# Systematic Literature Review Synthesis", synthesis)
         self.assertIn("Smith et al.", synthesis)
 
+    @patch("backend.llm_service._call_gemini_json")
+    async def test_screen_papers_manuscript_mode_via_gemini(self, mock_gemini_json):
+        mock_gemini_json.return_value = json.dumps({
+            "results": [
+                {"id": "paper-1", "include": "Yes", "explanation": "Full methods section shows valid cohort design."},
+            ]
+        })
+
+        pdf_bytes = make_test_pdf()
+        document = extract_manuscript(pdf_bytes, "paper-1", "study.pdf")
+
+        screen_req = ScreeningInput(
+            inclusionCriteria="Cohort studies with full text reporting sample > 50",
+            exclusionCriteria="Animal models",
+            screeningType="manuscript",
+            papers=[
+                PaperInput(id="paper-1", title="Cohort Study", abstract="Short abstract"),
+            ],
+        )
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "valid_mock_gemini_key", "LLM_PROVIDER": "auto"}):
+            results = await screen_papers_with_llm(screen_req, manuscripts={"paper-1": document})
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "paper-1")
+        self.assertEqual(results[0]["include"], "Yes")
+        self.assertEqual(results[0]["explanation"], "Full methods section shows valid cohort design.")
+        mock_gemini_json.assert_called_once()
+        # Verify prompt contained manuscript prompt instructions
+        called_prompt = mock_gemini_json.call_args[0][0]
+        self.assertIn("full manuscript text", called_prompt.lower())
+
+    async def test_screen_papers_manuscript_mode_mock(self):
+        screen_req = ScreeningInput(
+            inclusionCriteria="Valid RCT",
+            screeningType="manuscript",
+            papers=[
+                PaperInput(id="paper-1", title="RCT Study", abstract="Abstract 1"),
+            ],
+        )
+
+        with patch.dict("os.environ", {"LLM_PROVIDER": "mock"}):
+            results = await screen_papers_with_llm(screen_req)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "paper-1")
+        self.assertEqual(results[0]["include"], "Yes")
+        self.assertIn("manuscript text", results[0]["explanation"])
+
+    def test_screening_input_defaults_to_abstract(self):
+        screen_req = ScreeningInput(
+            inclusionCriteria="Valid RCT",
+            papers=[
+                PaperInput(id="paper-1", title="RCT Study", abstract="Abstract 1"),
+            ],
+        )
+        self.assertEqual(screen_req.screening_type, "abstract")
+
 
 if __name__ == "__main__":
     unittest.main()

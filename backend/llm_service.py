@@ -58,6 +58,7 @@ class ScreeningInput(BaseModel):
     papers: list[PaperInput] = Field(min_length=1, max_length=20)
     inclusion_criteria: str = Field(alias="inclusionCriteria", min_length=1)
     exclusion_criteria: str = Field(default="", alias="exclusionCriteria")
+    screening_type: str = Field(default="abstract", alias="screeningType")
 
 
 class ScreeningResult(BaseModel):
@@ -537,14 +538,44 @@ def _apply_summaries_to_document(
     return document
 
 
-async def screen_papers_with_llm(screen_request: ScreeningInput, timeout: float = 90.0) -> list[dict[str, Any]]:
+async def screen_papers_with_llm(
+    screen_request: ScreeningInput,
+    manuscripts: dict[str, Any] | None = None,
+    timeout: float = 90.0,
+) -> list[dict[str, Any]]:
     """
     Screen scientific papers against inclusion/exclusion criteria using Google Gemini API.
+    Supports Title/Abstract screening (default) and full Manuscript screening.
     Returns a list of dicts with {"id": ..., "include": "Yes"|"No"|"Not Sure", "explanation": "..."}.
     """
-    papers = [paper.model_dump() for paper in screen_request.papers]
-    paper_ids = [p["id"] for p in papers]
+    paper_ids = [paper.id for paper in screen_request.papers]
     exclusion_criteria = screen_request.exclusion_criteria.strip() or "None provided"
+    screening_type = (screen_request.screening_type or "abstract").strip().lower()
+
+    if screening_type == "manuscript":
+        papers_payload: list[dict[str, Any]] = []
+        for paper in screen_request.papers:
+            manuscript = manuscripts.get(paper.id) if manuscripts else None
+            if manuscript:
+                sample_text = build_substantive_manuscript_text(manuscript, max_chars=24000)
+                papers_payload.append({
+                    "id": paper.id,
+                    "title": paper.title,
+                    "authors": paper.authors,
+                    "year": paper.year,
+                    "manuscript_text": sample_text or paper.abstract or "[No substantive text available in manuscript]",
+                })
+            else:
+                papers_payload.append({
+                    "id": paper.id,
+                    "title": paper.title,
+                    "authors": paper.authors,
+                    "year": paper.year,
+                    "abstract": paper.abstract,
+                    "note": "Full manuscript not uploaded. Evaluated based on available Title and Abstract.",
+                })
+    else:
+        papers_payload = [paper.model_dump() for paper in screen_request.papers]
 
     provider_pref = os.getenv("LLM_PROVIDER", "auto").lower()
     if provider_pref == "mock":
@@ -553,37 +584,68 @@ async def screen_papers_with_llm(screen_request: ScreeningInput, timeout: float 
                 "id": pid,
                 "include": "Yes",
                 "decision": "Yes",
-                "explanation": "Mock screening match meeting inclusion criteria.",
+                "explanation": (
+                    "Mock screening match meeting inclusion criteria based on full manuscript text."
+                    if screening_type == "manuscript"
+                    else "Mock screening match meeting inclusion criteria."
+                ),
                 "rationale": "Mock screening match meeting inclusion criteria.",
                 "score": 10,
             }
             for pid in paper_ids
         ]
 
-    prompt = (
-        "You are an expert scientific systematic literature review screener. "
-        "Screen each scientific paper based on its title and abstract against the specified inclusion and exclusion criteria.\n\n"
-        "For each paper, provide:\n"
-        "1. 'include': Exactly one of 'Yes', 'No', or 'Not Sure'.\n"
-        "   - 'Yes': The paper clearly meets the inclusion criteria and does not meet any exclusion criteria.\n"
-        "   - 'No': The paper clearly violates the inclusion criteria or meets one or more exclusion criteria.\n"
-        "   - 'Not Sure': The title/abstract provides insufficient evidence to definitively decide, or the study is borderline.\n"
-        "2. 'explanation': A concise, factual explanation explaining why include is Yes, No, or Not Sure, referencing specific details from the title and abstract.\n\n"
-        "Rules:\n"
-        "- Exclusion criteria strictly override inclusion criteria.\n"
-        "- If abstract is missing or minimal, select 'Not Sure' and state that full-text review is required.\n"
-        "- Do not extrapolate or fabricate unsupported facts.\n\n"
-        f"Inclusion criteria:\n{screen_request.inclusion_criteria.strip()}\n\n"
-        f"Exclusion criteria:\n{exclusion_criteria}\n\n"
-        f"Papers to screen:\n{json.dumps(papers, ensure_ascii=False, indent=2)}\n\n"
-        "Return ONLY a JSON object with this exact structure:\n"
-        "{\n"
-        '  "results": [\n'
-        '    {"id": "paper_id", "include": "Yes", "explanation": "Evidence-based reason why include is Yes, No, or Not Sure"}\n'
-        "  ]\n"
-        "}\n"
-        "Include exactly one result for every input paper id."
-    )
+    if screening_type == "manuscript":
+        prompt = (
+            "You are an expert scientific systematic literature review screener. "
+            "Screen each scientific paper based on its full manuscript text (or title/abstract if manuscript is unavailable) against the specified inclusion and exclusion criteria.\n\n"
+            "For each paper, provide:\n"
+            "1. 'include': Exactly one of 'Yes', 'No', or 'Not Sure'.\n"
+            "   - 'Yes': The manuscript clearly meets the inclusion criteria and does not meet any exclusion criteria.\n"
+            "   - 'No': The manuscript clearly violates the inclusion criteria or meets one or more exclusion criteria.\n"
+            "   - 'Not Sure': The manuscript provides insufficient evidence to definitively decide, or the study is borderline.\n"
+            "2. 'explanation': A concise, factual explanation explaining why include is Yes, No, or Not Sure, referencing specific details, methodology, study design, or findings from the manuscript text.\n\n"
+            "Rules:\n"
+            "- Exclusion criteria strictly override inclusion criteria.\n"
+            "- Base your evaluation strictly on the provided manuscript text.\n"
+            "- If a paper has no manuscript attached and only abstract is provided, evaluate available details.\n"
+            "- Do not extrapolate or fabricate unsupported facts.\n\n"
+            f"Inclusion criteria:\n{screen_request.inclusion_criteria.strip()}\n\n"
+            f"Exclusion criteria:\n{exclusion_criteria}\n\n"
+            f"Manuscripts to screen:\n{json.dumps(papers_payload, ensure_ascii=False, indent=2)}\n\n"
+            "Return ONLY a JSON object with this exact structure:\n"
+            "{\n"
+            '  "results": [\n'
+            '    {"id": "paper_id", "include": "Yes", "explanation": "Evidence-based reason why include is Yes, No, or Not Sure referencing manuscript details"}\n'
+            "  ]\n"
+            "}\n"
+            "Include exactly one result for every input paper id."
+        )
+    else:
+        prompt = (
+            "You are an expert scientific systematic literature review screener. "
+            "Screen each scientific paper based on its title and abstract against the specified inclusion and exclusion criteria.\n\n"
+            "For each paper, provide:\n"
+            "1. 'include': Exactly one of 'Yes', 'No', or 'Not Sure'.\n"
+            "   - 'Yes': The paper clearly meets the inclusion criteria and does not meet any exclusion criteria.\n"
+            "   - 'No': The paper clearly violates the inclusion criteria or meets one or more exclusion criteria.\n"
+            "   - 'Not Sure': The title/abstract provides insufficient evidence to definitively decide, or the study is borderline.\n"
+            "2. 'explanation': A concise, factual explanation explaining why include is Yes, No, or Not Sure, referencing specific details from the title and abstract.\n\n"
+            "Rules:\n"
+            "- Exclusion criteria strictly override inclusion criteria.\n"
+            "- If abstract is missing or minimal, select 'Not Sure' and state that full-text review is required.\n"
+            "- Do not extrapolate or fabricate unsupported facts.\n\n"
+            f"Inclusion criteria:\n{screen_request.inclusion_criteria.strip()}\n\n"
+            f"Exclusion criteria:\n{exclusion_criteria}\n\n"
+            f"Papers to screen:\n{json.dumps(papers_payload, ensure_ascii=False, indent=2)}\n\n"
+            "Return ONLY a JSON object with this exact structure:\n"
+            "{\n"
+            '  "results": [\n'
+            '    {"id": "paper_id", "include": "Yes", "explanation": "Evidence-based reason why include is Yes, No, or Not Sure"}\n'
+            "  ]\n"
+            "}\n"
+            "Include exactly one result for every input paper id."
+        )
 
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not _is_valid_gemini_key(api_key):
