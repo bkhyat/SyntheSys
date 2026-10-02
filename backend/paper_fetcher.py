@@ -374,13 +374,32 @@ async def fetch_paper_pdf(
 async def fetch_and_store_paper_manuscript(
     paper: dict[str, Any],
     email: str | None = None,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     """
     Fetch open-access PDF for a paper, parse sections with extract_manuscript,
-    and persist into SQLite database.
+    and persist into SQLite database. If manuscript already exists and overwrite is False,
+    returns the existing manuscript.
     """
     paper_id = str(paper.get("id", "")).strip()
     title = str(paper.get("title", "")).strip()
+
+    if not overwrite and paper_id:
+        existing = await asyncio.to_thread(database.get_manuscript, paper_id)
+        if existing and isinstance(existing, dict):
+            return {
+                "id": paper_id,
+                "title": title or existing.get("title", paper_id),
+                "success": True,
+                "alreadyExists": True,
+                "source": "Existing Manuscript",
+                "sourceUrl": "",
+                "fileName": existing.get("file_name", f"{paper_id}.pdf"),
+                "pageCount": existing.get("page_count", 0),
+                "lineCount": existing.get("line_count", 0),
+                "warnings": existing.get("warnings", []),
+                "document": existing,
+            }
 
     fetch_res = await fetch_paper_pdf(paper, email=email)
     if not fetch_res.get("success"):
@@ -427,6 +446,7 @@ async def fetch_and_store_paper_manuscript(
         "id": paper_id,
         "title": title,
         "success": True,
+        "alreadyExists": False,
         "source": source,
         "sourceUrl": source_url,
         "fileName": file_name,
@@ -441,25 +461,33 @@ async def batch_fetch_manuscripts(
     papers: list[dict[str, Any]],
     max_concurrency: int = 4,
     email: str | None = None,
+    skip_existing: bool = True,
 ) -> dict[str, Any]:
     """
     Fetch and persist full text manuscripts for a batch of papers with controlled concurrency.
+    If skip_existing is True, papers with an already attached manuscript in SQLite are skipped.
     """
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _fetch_worker(paper: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
-            return await fetch_and_store_paper_manuscript(paper, email=email)
+            return await fetch_and_store_paper_manuscript(
+                paper,
+                email=email,
+                overwrite=not skip_existing,
+            )
 
     tasks = [_fetch_worker(p) for p in papers]
     results = await asyncio.gather(*tasks, return_exceptions=False)
 
-    succeeded = [r for r in results if r.get("success")]
+    succeeded = [r for r in results if r.get("success") and not r.get("alreadyExists")]
+    already_had = [r for r in results if r.get("success") and r.get("alreadyExists")]
     failed = [r for r in results if not r.get("success")]
 
     return {
         "total": len(papers),
         "succeededCount": len(succeeded),
+        "alreadyExistsCount": len(already_had),
         "failedCount": len(failed),
         "results": results,
     }

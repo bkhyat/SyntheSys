@@ -129,10 +129,12 @@ class SingleFetchPaperRequest(BaseModel):
     authors: str = ""
     journal: str = ""
     year: str = ""
+    force: bool = False
 
 
 class BatchFetchManuscriptsRequest(BaseModel):
     papers: list[SingleFetchPaperRequest]
+    skip_existing: bool = Field(default=True, alias="skipExisting")
 
 
 @app.get("/api/projects")
@@ -240,7 +242,8 @@ async def fetch_single_manuscript_endpoint(
 ) -> JSONResponse:
     paper_dict = paper_info.model_dump() if paper_info else {"id": paper_id}
     paper_dict["id"] = paper_id
-    result = await fetch_and_store_paper_manuscript(paper_dict)
+    force = bool(paper_info and paper_info.force)
+    result = await fetch_and_store_paper_manuscript(paper_dict, overwrite=force)
     status_code = 200 if result.get("success") else 404
     return JSONResponse(result, status_code=status_code)
 
@@ -250,7 +253,7 @@ async def batch_fetch_manuscripts_endpoint(
     request: BatchFetchManuscriptsRequest,
 ) -> JSONResponse:
     papers_data = [p.model_dump() for p in request.papers]
-    summary = await batch_fetch_manuscripts(papers_data)
+    summary = await batch_fetch_manuscripts(papers_data, skip_existing=request.skip_existing)
     return JSONResponse(summary)
 
 

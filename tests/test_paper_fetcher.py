@@ -158,3 +158,19 @@ class PaperFetcherApiTests(unittest.TestCase):
         doc = database.get_manuscript("paper-1")
         self.assertIsNotNone(doc)
         self.assertEqual(doc["paper_id"], "paper-1")
+
+        # Now do a second batch request with paper-1; mock_fetch_pdf should NOT be called for paper-1
+        mock_fetch_pdf.reset_mock()
+        response2 = client.post(
+            "/api/papers/batch-fetch-manuscripts",
+            json={
+                "skipExisting": True,
+                "papers": [
+                    {"id": "paper-1", "title": "Transformer Study", "doi": "10.48550/arXiv.1706.03762"},
+                ]
+            },
+        )
+        self.assertEqual(response2.status_code, 200)
+        data2 = response2.json()
+        self.assertEqual(data2["alreadyExistsCount"], 1)
+        mock_fetch_pdf.assert_not_called()

@@ -15,6 +15,7 @@ export type ScreeningType = 'abstract' | 'manuscript'
 export type ScreeningDecision = 'Yes' | 'No' | 'Not Sure'
 export type DecisionFilter = 'all' | 'Yes' | 'Not Sure' | 'No' | 'unscreened'
 export type AbstractFilter = 'all' | 'has_abstract' | 'missing_abstract'
+export type ManuscriptFilter = 'all' | 'missing_manuscript' | 'has_manuscript'
 export type DecisionSource = 'ai' | 'manual'
 
 export type ExtractionField = {
@@ -81,6 +82,7 @@ export type RetrievalSummary = {
   total: number
   succeededCount: number
   failedCount: number
+  skippedCount?: number
   results: RetrievalResultItem[]
 }
 type Project = { id: string; name: string; createdAt: string; lists: PaperList[] }
@@ -284,6 +286,7 @@ function App() {
 
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>('all')
   const [abstractFilter, setAbstractFilter] = useState<AbstractFilter>('all')
+  const [manuscriptFilter, setManuscriptFilter] = useState<ManuscriptFilter>('all')
 
   const [overrideTargetPaper, setOverrideTargetPaper] = useState<Paper | null>(null)
   const [overrideDecision, setOverrideDecision] = useState<ScreeningDecision | 'unscreened'>('Yes')
@@ -295,6 +298,7 @@ function App() {
     setVisibilityFilter('included')
     setDecisionFilter('all')
     setAbstractFilter('all')
+    setManuscriptFilter('all')
     setOverrideTargetPaper(null)
   }, [activeListId])
 
@@ -395,9 +399,15 @@ function App() {
         if (paper.abstract && paper.abstract.trim()) return false
       }
 
+      if (manuscriptFilter === 'has_manuscript') {
+        if (!paper.manuscript) return false
+      } else if (manuscriptFilter === 'missing_manuscript') {
+        if (paper.manuscript) return false
+      }
+
       return true
     })
-  }, [activeList, resolvedActiveListPapers, search, visibilityFilter, decisionFilter, abstractFilter])
+  }, [activeList, resolvedActiveListPapers, search, visibilityFilter, decisionFilter, abstractFilter, manuscriptFilter])
 
   const includedCount = useMemo(() => {
     if (!activeList) return 0
@@ -441,6 +451,14 @@ function App() {
 
   const missingAbstractCount = useMemo(() => {
     return resolvedActiveListPapers.filter((p) => !p.abstract || !p.abstract.trim()).length
+  }, [resolvedActiveListPapers])
+
+  const hasManuscriptCount = useMemo(() => {
+    return resolvedActiveListPapers.filter((p) => Boolean(p.manuscript)).length
+  }, [resolvedActiveListPapers])
+
+  const missingManuscriptCount = useMemo(() => {
+    return resolvedActiveListPapers.filter((p) => !p.manuscript).length
   }, [resolvedActiveListPapers])
 
   // Destination Stage in copy dialog
@@ -910,11 +928,23 @@ function App() {
 
   async function handleRetrieveSelectedFullText() {
     if (!activeProject || !activeList || selectedIds.size === 0) return
-    const targets = resolvedActiveListPapers.filter((p) => selectedIds.has(p.id))
-    if (targets.length === 0) return
+    const allSelected = resolvedActiveListPapers.filter((p) => selectedIds.has(p.id))
+    if (allSelected.length === 0) return
 
+    // Exclude papers that already have an attached manuscript
+    const targets = allSelected.filter((p) => !p.manuscript)
+    if (targets.length === 0) {
+      setToast('All selected papers already have a manuscript attached.')
+      return
+    }
+
+    const skippedCount = allSelected.length - targets.length
     setRetrievingFullText(true)
-    setRetrievingProgress(`Searching open-access repositories for ${targets.length} papers...`)
+    setRetrievingProgress(
+      skippedCount > 0
+        ? `Searching open-access repositories for ${targets.length} papers (${skippedCount} already attached)...`
+        : `Searching open-access repositories for ${targets.length} papers...`
+    )
     setError('')
 
     try {
@@ -922,6 +952,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          skipExisting: true,
           papers: targets.map((p) => ({
             id: p.id,
             title: p.title,
@@ -973,8 +1004,19 @@ function App() {
         }))
       }
 
-      setRetrievalSummary(summary)
-      setToast(`Retrieved ${summary.succeededCount} of ${summary.total} full-text manuscripts`)
+      setRetrievalSummary({
+        ...summary,
+        skippedCount: skippedCount > 0 ? skippedCount : undefined,
+      })
+      if (succeededMap.size > 0) {
+        setToast(
+          skippedCount > 0
+            ? `Retrieved ${succeededMap.size} manuscripts (${skippedCount} already attached).`
+            : `Retrieved ${succeededMap.size} of ${summary.total} full-text manuscripts.`
+        )
+      } else {
+        setToast('Full-text retrieval finished. Check summary for details.')
+      }
     } catch (fetchErr: unknown) {
       setError(fetchErr instanceof Error ? fetchErr.message : 'Full-text retrieval failed. Try again.')
     } finally {
@@ -1682,6 +1724,25 @@ function App() {
                     </div>
                   )}
 
+                  {resolvedActiveListPapers.length > 0 && (
+                    <div className="manuscript-filter-dropdown-wrap">
+                      <label htmlFor="manuscript-filter-select" className="manuscript-filter-label">
+                        MANUSCRIPT:
+                      </label>
+                      <select
+                        id="manuscript-filter-select"
+                        className="manuscript-filter-select"
+                        value={manuscriptFilter}
+                        onChange={(event) => setManuscriptFilter(event.target.value as ManuscriptFilter)}
+                        aria-label="Filter by manuscript availability"
+                      >
+                        <option value="all">All ({resolvedActiveListPapers.length})</option>
+                        <option value="missing_manuscript">Missing Manuscript ({missingManuscriptCount})</option>
+                        <option value="has_manuscript">Has Manuscript ({hasManuscriptCount})</option>
+                      </select>
+                    </div>
+                  )}
+
                   <label className="search-box"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search papers" aria-label="Search papers" /><kbd>/</kbd></label>
                 </div>
               )}
@@ -1939,7 +2000,7 @@ function App() {
                       <p>{activeList.papers.length ? 'Adjust your visibility or decision filters to see more papers.' : 'Upload a CSV or Excel file, or copy papers from an earlier stage.'}</p>
                     </div>
                     {activeList.papers.length ? (
-                      <button className="button button-secondary" onClick={() => { setVisibilityFilter('all'); setDecisionFilter('all'); setAbstractFilter('all'); setSearch('') }}>Reset filters</button>
+                      <button className="button button-secondary" onClick={() => { setVisibilityFilter('all'); setDecisionFilter('all'); setAbstractFilter('all'); setManuscriptFilter('all'); setSearch('') }}>Reset filters</button>
                     ) : (
                       <button className="button button-secondary" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> Choose file</button>
                     )}
@@ -2748,6 +2809,12 @@ function App() {
               <span>TOTAL PAPERS</span>
               <strong>{retrievalSummary.total}</strong>
             </div>
+            {retrievalSummary.skippedCount !== undefined && retrievalSummary.skippedCount > 0 && (
+              <div className="retrieval-stat-item skipped">
+                <span>ALREADY ATTACHED</span>
+                <strong>{retrievalSummary.skippedCount}</strong>
+              </div>
+            )}
             <div className="retrieval-stat-item succeeded">
               <span>RETRIEVED &amp; PARSED</span>
               <strong>{retrievalSummary.succeededCount}</strong>
