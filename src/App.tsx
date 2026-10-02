@@ -1082,10 +1082,15 @@ function App() {
       setScreening(true)
       try {
         const results: ScreeningResult[] = []
-        const currentBatchSize = effectiveScreeningType === 'manuscript' ? 4 : BATCH_SIZE
+        const currentBatchSize = effectiveScreeningType === 'manuscript' ? 1 : BATCH_SIZE
         for (let offset = 0; offset < selectedPapers.length; offset += currentBatchSize) {
           const batch = selectedPapers.slice(offset, offset + currentBatchSize)
-          setScreeningProgress(`Screening (${effectiveScreeningType === 'manuscript' ? 'Manuscript' : 'Title/Abstract'}) ${Math.min(offset + batch.length, selectedPapers.length)} of ${selectedPapers.length}`)
+          if (effectiveScreeningType === 'manuscript') {
+            const titleSnippet = batch[0]?.title ? ` · ${batch[0].title.slice(0, 45)}${batch[0].title.length > 45 ? '…' : ''}` : ''
+            setScreeningProgress(`Screening manuscript ${offset + 1} of ${selectedPapers.length}${titleSnippet}`)
+          } else {
+            setScreeningProgress(`Screening (Title/Abstract) ${Math.min(offset + batch.length, selectedPapers.length)} of ${selectedPapers.length}`)
+          }
           const response = await fetch('/api/screen', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

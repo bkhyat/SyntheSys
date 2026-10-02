@@ -402,28 +402,38 @@ def extract_section_mappings_summary(document: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _is_node_excluded(node: dict[str, Any]) -> bool:
+    """Check if a section node represents references, funding, acknowledgments, or other administrative content."""
+    if node.get("is_excluded_from_llm"):
+        return True
+    std = node.get("standard_section")
+    if std in ("References", "Administrative (Excluded)"):
+        return True
+    orig = (node.get("original_title") or node.get("title") or "").strip()
+    cleaned = clean_section_heading(orig)
+    for pattern in _EXCLUDED_SECTION_PATTERNS:
+        if pattern.search(orig) or pattern.search(cleaned):
+            return True
+    for syn in _STANDARD_SYNONYMS.get("References", []):
+        if orig.lower().startswith(syn) or cleaned.lower().startswith(syn):
+            return True
+    return False
+
+
 def get_substantive_lines(document: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Extract all DocumentLines from the manuscript that belong to substantive scientific sections
-    (excluding References, Funding, Acknowledgments, Contributions, Data Availability, etc.)
-    for use in LLM prompts.
+    (strictly excluding References, Funding, Acknowledgments, Contributions, Data Availability, etc.)
+    for use in LLM screening and data extraction prompts.
     """
     sections = document.get("sections", [])
     all_pages = document.get("pages", [])
-
-    # Map of "page:line" -> DocumentLine
-    lines_by_ref: dict[str, dict[str, Any]] = {}
-    for page in all_pages:
-        p_num = page.get("page_number", 1)
-        for line in page.get("lines", []):
-            l_num = line.get("line_number", 1)
-            lines_by_ref[f"{p_num}:{l_num}"] = line
 
     excluded_refs: set[str] = set()
 
     def _find_excluded(nodes: list[dict[str, Any]]) -> None:
         for node in nodes:
-            if node.get("is_excluded_from_llm") or node.get("standard_section") == "References":
+            if _is_node_excluded(node):
                 for ref in node.get("line_refs", []):
                     excluded_refs.add(f"{ref.get('page_number')}:{ref.get('line_number')}")
             if node.get("children"):
@@ -431,14 +441,42 @@ def get_substantive_lines(document: dict[str, Any]) -> list[dict[str, Any]]:
 
     _find_excluded(sections)
 
+    # Also exclude line_refs from document["references"] collection
+    for ref_item in document.get("references", []):
+        for ref in ref_item.get("line_refs", []):
+            excluded_refs.add(f"{ref.get('page_number')}:{ref.get('line_number')}")
+
     # Collect valid lines in sequential order
     substantive_lines: list[dict[str, Any]] = []
+    in_unmapped_excluded_block = False
+
     for page in all_pages:
         p_num = page.get("page_number", 1)
         for line in page.get("lines", []):
             l_num = line.get("line_number", 1)
             ref_key = f"{p_num}:{l_num}"
-            if ref_key not in excluded_refs:
+
+            if ref_key in excluded_refs:
+                continue
+
+            # Check if an unmapped line starts an obvious excluded section
+            text = line.get("text", "").strip()
+            if text:
+                cleaned_text = clean_section_heading(text)
+                is_excluded_heading = any(pattern.match(text) or pattern.match(cleaned_text) for pattern in _EXCLUDED_SECTION_PATTERNS)
+                if not is_excluded_heading:
+                    is_excluded_heading = any(text.lower().startswith(f"{syn}:") or text.lower() == syn for syn in _STANDARD_SYNONYMS.get("References", []))
+                
+                if is_excluded_heading:
+                    in_unmapped_excluded_block = True
+                    continue
+
+                # Resume if a standard scientific heading is encountered
+                std_match, _ = match_standard_section(cleaned_text, is_top_level=True)
+                if std_match and std_match != "References":
+                    in_unmapped_excluded_block = False
+
+            if not in_unmapped_excluded_block:
                 substantive_lines.append(line)
 
     return substantive_lines
@@ -446,11 +484,11 @@ def get_substantive_lines(document: dict[str, Any]) -> list[dict[str, Any]]:
 
 def build_substantive_manuscript_text(
     document: dict[str, Any],
-    max_chars: int = 24000,
+    max_chars: int = 32000,
 ) -> str:
     """
-    Construct a clean text excerpt of the manuscript containing only substantive sections,
-    strictly omitting References, Acknowledgments, Funding, Author Contributions, etc.
+    Construct a clean, structured text excerpt of the manuscript containing only substantive sections,
+    strictly omitting References, Acknowledgments, Funding, Author Contributions, Disclosures, etc.
     """
     substantive_lines = get_substantive_lines(document)
     if not substantive_lines:
@@ -461,7 +499,7 @@ def build_substantive_manuscript_text(
                 t = line.get("text", "").strip()
                 if t:
                     lines.append(t)
-        return "\n".join(lines[:100])
+        return "\n".join(lines[:120])
 
     accumulated: list[str] = []
     current_len = 0

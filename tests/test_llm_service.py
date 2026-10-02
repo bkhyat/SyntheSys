@@ -354,7 +354,7 @@ class LLMServiceTests(unittest.IsolatedAsyncioTestCase):
         mock_gemini_json.assert_called_once()
         # Verify prompt contained manuscript prompt instructions
         called_prompt = mock_gemini_json.call_args[0][0]
-        self.assertIn("full manuscript text", called_prompt.lower())
+        self.assertIn("full-text manuscript", called_prompt.lower())
 
     async def test_screen_papers_manuscript_mode_mock(self):
         screen_req = ScreeningInput(
