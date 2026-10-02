@@ -31,6 +31,7 @@ from .llm_service import (
 )
 from .pdf_parser import extract_manuscript
 from .section_matcher import apply_manual_section_mappings
+from .paper_fetcher import fetch_and_store_paper_manuscript, batch_fetch_manuscripts
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -118,6 +119,20 @@ class ProjectInput(BaseModel):
     name: str
     created_at: str = Field(alias="createdAt")
     lists: list[ProjectListInput] = Field(default_factory=list)
+
+
+class SingleFetchPaperRequest(BaseModel):
+    id: str
+    title: str = ""
+    doi: str = ""
+    url: str = ""
+    authors: str = ""
+    journal: str = ""
+    year: str = ""
+
+
+class BatchFetchManuscriptsRequest(BaseModel):
+    papers: list[SingleFetchPaperRequest]
 
 
 @app.get("/api/projects")
@@ -216,6 +231,27 @@ async def summarize_manuscript_endpoint(paper_id: str) -> dict[str, Any]:
     document = await generate_manuscript_summaries(document)
     await run_in_threadpool(database.save_manuscript, document, pdf_bytes, None)
     return document
+
+
+@app.post("/api/papers/{paper_id}/fetch-manuscript")
+async def fetch_single_manuscript_endpoint(
+    paper_id: str,
+    paper_info: SingleFetchPaperRequest | None = None,
+) -> JSONResponse:
+    paper_dict = paper_info.model_dump() if paper_info else {"id": paper_id}
+    paper_dict["id"] = paper_id
+    result = await fetch_and_store_paper_manuscript(paper_dict)
+    status_code = 200 if result.get("success") else 404
+    return JSONResponse(result, status_code=status_code)
+
+
+@app.post("/api/papers/batch-fetch-manuscripts")
+async def batch_fetch_manuscripts_endpoint(
+    request: BatchFetchManuscriptsRequest,
+) -> JSONResponse:
+    papers_data = [p.model_dump() for p in request.papers]
+    summary = await batch_fetch_manuscripts(papers_data)
+    return JSONResponse(summary)
 
 
 async def _get_current_manuscript(paper_id: str) -> dict[str, Any]:

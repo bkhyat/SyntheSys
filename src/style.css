@@ -276,12 +276,33 @@ a.paper-title:hover { color: #277354; text-decoration: underline; text-underline
 .export-btn:disabled { opacity: .45; cursor: not-allowed; }
 .export-divider { color: #bcc8be; font-size: 10px; }
 .review-page > .bottom-caption { margin-top: 26px; }
-.selection-bar { position: fixed; z-index: 5; right: 24px; bottom: 20px; left: calc(234px + 24px); display: flex; align-items: center; justify-content: space-between; width: min(470px, calc(100vw - 282px)); min-height: 52px; margin: 0 auto; padding: 7px 8px 7px 15px; border: 1px solid #d4e0d4; border-radius: 6px; background: #fff; box-shadow: 0 10px 35px #2749381b; color: #617066; font-size: 11px; }
+.selection-bar { position: fixed; z-index: 5; right: 24px; bottom: 20px; left: calc(234px + 24px); display: flex; align-items: center; justify-content: space-between; width: min(600px, calc(100vw - 282px)); min-height: 52px; margin: 0 auto; padding: 7px 8px 7px 15px; border: 1px solid #d4e0d4; border-radius: 6px; background: #fff; box-shadow: 0 10px 35px #2749381b; color: #617066; font-size: 11px; }
 .selection-bar strong { color: #2e684f; font-family: var(--mono); }
 .clear-selection { margin-left: 7px; padding: 2px; border: 0; background: transparent; color: #8a968d; font-size: 10px; cursor: pointer; }
 .clear-selection:hover { color: var(--coral); }
 .button-selection { min-height: 34px; background: var(--forest); color: white; }
 .button-selection:hover { background: var(--forest-dark); }
+.button-selection-action.button-retrieve-fulltext { background: #e8f5ec; color: #1c623d; border-color: #badfc6; font-weight: 600; }
+.button-selection-action.button-retrieve-fulltext:hover:not(:disabled) { background: #d7efde; color: #0d4a2a; border-color: #92cca4; }
+.button-selection-action.button-retrieve-fulltext:disabled { opacity: .65; cursor: wait; }
+.retrieval-summary-modal { width: min(100%, 650px); max-height: 88vh; display: flex; flex-direction: column; }
+.retrieval-stats-strip { display: flex; align-items: center; gap: 16px; margin: 12px 0 16px; padding: 10px 16px; background: #f4f8f5; border: 1px solid #dbe6de; border-radius: 6px; }
+.retrieval-stat-item { display: flex; flex-direction: column; gap: 1px; }
+.retrieval-stat-item span { font-size: 8px; color: #728277; font-family: var(--mono); letter-spacing: .04em; }
+.retrieval-stat-item strong { font-size: 15px; font-family: var(--mono); }
+.retrieval-stat-item.succeeded strong { color: #1b6a44; }
+.retrieval-stat-item.failed strong { color: #ad4229; }
+.retrieval-results-scroll { flex: 1 1 auto; overflow-y: auto; max-height: 340px; margin-bottom: 14px; border: 1px solid #e1e8e2; border-radius: 5px; background: #ffffff; }
+.retrieval-result-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 13px; border-bottom: 1px solid #edf2ee; }
+.retrieval-result-row:last-child { border-bottom: 0; }
+.retrieval-result-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+.retrieval-result-title { font-size: 11px; font-weight: 500; color: #27382d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.retrieval-result-detail { display: flex; align-items: center; gap: 6px; font-size: 9px; color: #728277; }
+.retrieval-source-pill { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 3px; font-family: var(--mono); font-size: 8.5px; font-weight: 600; background: #e8f5ed; color: #246d48; border: 1px solid #c2e2d0; }
+.retrieval-source-pill.failed-pill { background: #fdf2ef; color: #9c412e; border-color: #f5cec5; }
+.retrieval-manual-upload-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid #d4ded4; border-radius: 4px; background: #f7faf7; color: #375444; font-size: 9px; font-weight: 600; cursor: pointer; white-space: nowrap; flex: 0 0 auto; transition: all .15s ease; }
+.retrieval-manual-upload-btn:hover { background: #eaf3eb; border-color: #2b7654; color: #174830; }
+.row-manuscript-button.retrieve:hover:not(:disabled) { border-color: #b7ded0; background: #e8f5ed; color: #1d6945; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; overflow-y: auto; padding: 20px; background: rgb(27 39 32 / 38%); backdrop-filter: blur(3px); animation: fade-in .16s ease-out; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .modal { width: min(100%, 430px); padding: 22px 24px 20px; border: 1px solid #dce4dc; border-radius: 7px; background: #fcfcf9; box-shadow: 0 24px 80px #1d342647; animation: modal-in .2s ease-out; }

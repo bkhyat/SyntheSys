@@ -64,6 +64,25 @@ export type PaperList = {
   minScore?: number
   papers: (Paper | PaperRef)[]
 }
+export type RetrievalResultItem = {
+  id: string
+  title: string
+  success: boolean
+  source?: string
+  sourceUrl?: string
+  fileName?: string
+  pageCount?: number
+  lineCount?: number
+  error?: string
+  doi?: string
+  document?: ManuscriptDocument
+}
+export type RetrievalSummary = {
+  total: number
+  succeededCount: number
+  failedCount: number
+  results: RetrievalResultItem[]
+}
 type Project = { id: string; name: string; createdAt: string; lists: PaperList[] }
 type ScreeningResult = { id: string; include: ScreeningDecision; explanation: string; decision?: ScreeningDecision; score?: number; rationale?: string }
 const LEGACY_STORAGE_KEY = 'fieldnote.projects.v1'
@@ -188,6 +207,10 @@ function App() {
   const [projectName, setProjectName] = useState('')
   const [toast, setToast] = useState('')
   const [error, setError] = useState('')
+  const [retrievingFullText, setRetrievingFullText] = useState(false)
+  const [retrievingProgress, setRetrievingProgress] = useState('')
+  const [fetchingPaperId, setFetchingPaperId] = useState<string | null>(null)
+  const [retrievalSummary, setRetrievalSummary] = useState<RetrievalSummary | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const manuscriptInputRef = useRef<HTMLInputElement>(null)
   const manuscriptTargetRef = useRef<string | null>(null)
@@ -830,6 +853,133 @@ function App() {
     } finally {
       setUploadingPaperId(null)
       if (manuscriptInputRef.current) manuscriptInputRef.current.value = ''
+    }
+  }
+
+  async function handleSingleFetch(paper: Paper) {
+    if (!activeProject) return
+    setFetchingPaperId(paper.id)
+    setError('')
+    try {
+      const response = await fetch(`/api/papers/${encodeURIComponent(paper.id)}/fetch-manuscript`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: paper.id,
+          title: paper.title,
+          doi: paper.doi,
+          url: paper.url,
+          authors: paper.authors,
+          journal: paper.journal,
+          year: paper.year,
+        }),
+      })
+      const payload = (await response.json()) as RetrievalResultItem & { warnings?: string[] }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'No open access manuscript found in online repositories.')
+      }
+
+      const manuscript: ManuscriptMetadata = {
+        fileName: payload.fileName ?? `${paper.id}.pdf`,
+        pageCount: payload.pageCount ?? 0,
+        lineCount: payload.lineCount ?? 0,
+        extractedAt: payload.document?.extracted_at ?? new Date().toISOString(),
+        warnings: payload.warnings ?? [],
+      }
+
+      updateProject(activeProject.id, (project) => ({
+        ...project,
+        lists: project.lists.map((list, idx) => {
+          if (idx === 0) {
+            return {
+              ...list,
+              papers: list.papers.map((p) => (p.id === paper.id ? { ...p, manuscript } : p)),
+            }
+          }
+          return list
+        }),
+      }))
+
+      setToast(`Retrieved ${manuscript.fileName} via ${payload.source || 'Open Access'}`)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not retrieve full text online.')
+    } finally {
+      setFetchingPaperId(null)
+    }
+  }
+
+  async function handleRetrieveSelectedFullText() {
+    if (!activeProject || !activeList || selectedIds.size === 0) return
+    const targets = resolvedActiveListPapers.filter((p) => selectedIds.has(p.id))
+    if (targets.length === 0) return
+
+    setRetrievingFullText(true)
+    setRetrievingProgress(`Searching open-access repositories for ${targets.length} papers...`)
+    setError('')
+
+    try {
+      const response = await fetch('/api/papers/batch-fetch-manuscripts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          papers: targets.map((p) => ({
+            id: p.id,
+            title: p.title,
+            doi: p.doi,
+            url: p.url,
+            authors: p.authors,
+            journal: p.journal,
+            year: p.year,
+          })),
+        }),
+      })
+
+      const summary = (await response.json()) as RetrievalSummary
+      if (!response.ok) {
+        throw new Error('Batch manuscript retrieval request failed.')
+      }
+
+      // Update state for all succeeded papers
+      const succeededMap = new Map<string, RetrievalResultItem>()
+      for (const item of summary.results) {
+        if (item.success && item.fileName) {
+          succeededMap.set(item.id, item)
+        }
+      }
+
+      if (succeededMap.size > 0) {
+        updateProject(activeProject.id, (project) => ({
+          ...project,
+          lists: project.lists.map((list, idx) => {
+            if (idx === 0) {
+              return {
+                ...list,
+                papers: list.papers.map((p) => {
+                  const match = succeededMap.get(p.id)
+                  if (!match) return p
+                  const manuscript: ManuscriptMetadata = {
+                    fileName: match.fileName ?? `${p.id}.pdf`,
+                    pageCount: match.pageCount ?? 0,
+                    lineCount: match.lineCount ?? 0,
+                    extractedAt: match.document?.extracted_at ?? new Date().toISOString(),
+                    warnings: match.document?.warnings ?? [],
+                  }
+                  return { ...p, manuscript }
+                }),
+              }
+            }
+            return list
+          }),
+        }))
+      }
+
+      setRetrievalSummary(summary)
+      setToast(`Retrieved ${summary.succeededCount} of ${summary.total} full-text manuscripts`)
+    } catch (fetchErr: unknown) {
+      setError(fetchErr instanceof Error ? fetchErr.message : 'Full-text retrieval failed. Try again.')
+    } finally {
+      setRetrievingFullText(false)
+      setRetrievingProgress('')
     }
   }
 
@@ -1738,7 +1888,19 @@ function App() {
                                 </td>
                               )}
                               <td className="manuscript-actions-cell">
-                                <button className="row-manuscript-button" type="button" onClick={() => chooseManuscriptFile(paper.id)} disabled={uploadingPaperId === paper.id} title={paper.manuscript ? 'Replace manuscript PDF' : 'Attach manuscript PDF'} aria-label={paper.manuscript ? `Replace PDF for ${paper.title}` : `Attach PDF for ${paper.title}`}>
+                                {!paper.manuscript && (
+                                  <button
+                                    className="row-manuscript-button retrieve"
+                                    type="button"
+                                    onClick={() => void handleSingleFetch(paper)}
+                                    disabled={fetchingPaperId === paper.id || uploadingPaperId === paper.id}
+                                    title="Retrieve open-access full-text PDF online (Unpaywall, PMC, arXiv, OpenAlex)"
+                                    aria-label={`Retrieve PDF for ${paper.title}`}
+                                  >
+                                    {fetchingPaperId === paper.id ? <LoaderCircle size={15} className="spin" /> : <ArrowDownToLine size={15} />}
+                                  </button>
+                                )}
+                                <button className="row-manuscript-button" type="button" onClick={() => chooseManuscriptFile(paper.id)} disabled={uploadingPaperId === paper.id || fetchingPaperId === paper.id} title={paper.manuscript ? 'Replace manuscript PDF' : 'Attach manuscript PDF manually'} aria-label={paper.manuscript ? `Replace PDF for ${paper.title}` : `Attach PDF for ${paper.title}`}>
                                   {uploadingPaperId === paper.id ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}
                                 </button>
                                 {paper.manuscript && (
@@ -1973,6 +2135,23 @@ function App() {
       <div className="selection-actions">
         <button type="button" className="button button-selection-action" onClick={() => setSelectionVisibility('show')} title="Show selected in stage"><Eye size={14} /> Show</button>
         <button type="button" className="button button-selection-action" onClick={() => setSelectionVisibility('hide')} title="Hide selected from stage"><EyeOff size={14} /> Hide</button>
+        <button
+          type="button"
+          className="button button-selection-action button-retrieve-fulltext"
+          onClick={() => void handleRetrieveSelectedFullText()}
+          disabled={retrievingFullText}
+          title="Pull open-access manuscript PDFs for selected papers (Unpaywall, Europe PMC, arXiv, OpenAlex, Semantic Scholar)"
+        >
+          {retrievingFullText ? (
+            <>
+              <LoaderCircle size={14} className="spin" /> {retrievingProgress || 'Retrieving...'}
+            </>
+          ) : (
+            <>
+              <ArrowDownToLine size={14} /> Retrieve Full Text
+            </>
+          )}
+        </button>
         <button className="button button-selection" onClick={openCopyDialog}><ArrowRight size={15} /> Copy to Stage <ChevronDown size={14} /></button>
       </div>
     </div>}
@@ -2545,6 +2724,79 @@ function App() {
                 <ArrowRight size={15} /> Copy to Stage
               </button>
             )}
+          </div>
+        </section>
+      </div>
+    )}
+
+    {/* Full-Text Retrieval Summary Modal */}
+    {retrievalSummary && (
+      <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setRetrievalSummary(null) }}>
+        <section className="modal retrieval-summary-modal" aria-labelledby="retrieval-summary-title">
+          <div className="modal-topline">
+            <span className="modal-icon"><ArrowDownToLine size={17} /></span>
+            <button type="button" className="icon-button" onClick={() => setRetrievalSummary(null)} title="Close"><X size={17} /></button>
+          </div>
+          <span className="section-kicker">MANUSCRIPT RETRIEVAL</span>
+          <h2 id="retrieval-summary-title">Full-Text Retrieval Summary</h2>
+          <p className="modal-description">
+            Open-access discovery across Unpaywall, PubMed Central, OpenAlex, Semantic Scholar, and arXiv.
+          </p>
+
+          <div className="retrieval-stats-strip">
+            <div className="retrieval-stat-item">
+              <span>TOTAL PAPERS</span>
+              <strong>{retrievalSummary.total}</strong>
+            </div>
+            <div className="retrieval-stat-item succeeded">
+              <span>RETRIEVED &amp; PARSED</span>
+              <strong>{retrievalSummary.succeededCount}</strong>
+            </div>
+            <div className="retrieval-stat-item failed">
+              <span>UNAVAILABLE / PAYWALLED</span>
+              <strong>{retrievalSummary.failedCount}</strong>
+            </div>
+          </div>
+
+          <div className="retrieval-results-scroll">
+            {retrievalSummary.results.map((res) => (
+              <div key={res.id} className="retrieval-result-row">
+                <div className="retrieval-result-info">
+                  <div className="retrieval-result-title" title={res.title}>{res.title}</div>
+                  <div className="retrieval-result-detail">
+                    {res.success ? (
+                      <>
+                        <span className="retrieval-source-pill"><Check size={11} /> {res.source || 'Open Access'}</span>
+                        <span>· {res.pageCount ?? 0} pages ({res.lineCount ?? 0} lines)</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="retrieval-source-pill failed-pill"><X size={11} /> Not Available</span>
+                        <span title={res.error}>{res.error || 'Behind paywall or no OA repository found'}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {!res.success && (
+                  <button
+                    type="button"
+                    className="retrieval-manual-upload-btn"
+                    onClick={() => {
+                      chooseManuscriptFile(res.id)
+                    }}
+                    title="Upload PDF manually"
+                  >
+                    <Upload size={12} /> Upload PDF
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="button button-primary" onClick={() => setRetrievalSummary(null)}>
+              <Check size={15} /> Done
+            </button>
           </div>
         </section>
       </div>
